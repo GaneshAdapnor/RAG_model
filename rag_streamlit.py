@@ -23,11 +23,26 @@ import streamlit as st
 try:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 except ImportError:
-    # Fallback for older versions
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    try:
+        # Fallback for older versions
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
+    except ImportError:
+        st.error("❌ Could not import RecursiveCharacterTextSplitter. Please install langchain-text-splitters.")
+        st.stop()
 
-from langchain_community.vectorstores import FAISS
-from langchain_community.chat_models import ChatOpenAI
+# Vector store - with error handling
+try:
+    from langchain_community.vectorstores import FAISS
+except ImportError:
+    st.error("❌ Could not import FAISS. Please install langchain-community and faiss-cpu.")
+    st.stop()
+
+# Chat models - with error handling
+try:
+    from langchain_community.chat_models import ChatOpenAI
+except ImportError:
+    st.error("❌ Could not import ChatOpenAI. Please install langchain-community.")
+    st.stop()
 
 # Note: RetrievalQA is deprecated in LangChain 1.0+
 # We'll use LCEL (LangChain Expression Language) approach instead
@@ -36,8 +51,12 @@ from langchain_community.chat_models import ChatOpenAI
 try:
     from langchain_core.documents import Document
 except ImportError:
-    # Fallback for older versions
-    from langchain.schema import Document
+    try:
+        # Fallback for older versions
+        from langchain.schema import Document
+    except ImportError:
+        st.error("❌ Could not import Document. Please install langchain-core or langchain.")
+        st.stop()
 
 # PDF processing libraries
 try:
@@ -84,8 +103,12 @@ TOP_K = 5
 CACHE_DIR = Path(".rag_cache")
 EMBEDDINGS_CACHE_FILE = CACHE_DIR / "embeddings_cache.pkl"
 
-# Initialize cache directory
-CACHE_DIR.mkdir(exist_ok=True)
+# Initialize cache directory (with error handling for Streamlit Cloud)
+try:
+    CACHE_DIR.mkdir(exist_ok=True)
+except Exception:
+    # If cache directory can't be created, continue anyway
+    pass
 
 
 def get_file_hash(file_bytes: bytes) -> str:
@@ -365,15 +388,18 @@ def format_source_docs(source_docs: List[Document]) -> str:
 
 def main():
     """Main Streamlit application."""
-    
-    st.set_page_config(
-        page_title="RAG PDF Q&A System",
-        page_icon="📚",
-        layout="wide"
-    )
-    
-    st.title("📚 Retrieval-Augmented Generation (RAG) PDF Q&A System")
-    st.markdown("Upload PDF files and ask questions based on their contents.")
+    try:
+        st.set_page_config(
+            page_title="RAG PDF Q&A System",
+            page_icon="📚",
+            layout="wide"
+        )
+        
+        st.title("📚 Retrieval-Augmented Generation (RAG) PDF Q&A System")
+        st.markdown("Upload PDF files and ask questions based on their contents.")
+    except Exception as e:
+        # If page config already set, continue
+        pass
     
     # Sidebar for configuration
     with st.sidebar:
@@ -571,5 +597,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        st.error("❌ Application Error")
+        st.code(str(e))
+        st.code(traceback.format_exc())
+        st.info("💡 Check the Streamlit Cloud logs for more details.")
 
