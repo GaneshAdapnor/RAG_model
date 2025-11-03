@@ -579,6 +579,17 @@ def main():
                                 if "401" in error_msg or "invalid_api_key" in error_msg or "AuthenticationError" in error_msg:
                                     st.error("❌ Invalid OpenAI API key. Please check your API key in the sidebar.")
                                     st.info("💡 Get your API key from: https://platform.openai.com/account/api-keys")
+                                elif "429" in error_msg or "insufficient_quota" in error_msg or "quota" in error_msg.lower():
+                                    st.error("❌ **OpenAI API Quota Exceeded**")
+                                    st.warning("Your OpenAI API key has exceeded its quota or billing limit.")
+                                    st.info("""
+                                    **To fix this:**
+                                    1. **Add credits** to your OpenAI account: https://platform.openai.com/account/billing
+                                    2. **Check your usage** and billing: https://platform.openai.com/usage
+                                    3. **Or remove the API key** from the sidebar to use the app with SentenceTransformers (embeddings only)
+                                    
+                                    **Note:** The app currently requires OpenAI API for generating answers, but embeddings can use SentenceTransformers (free).
+                                    """)
                                 else:
                                     st.error(f"❌ Error generating answer: {error_msg[:300]}")
                         except Exception as e:
@@ -586,6 +597,17 @@ def main():
                             if "401" in error_msg or "invalid_api_key" in error_msg or "AuthenticationError" in error_msg:
                                 st.error("❌ Invalid OpenAI API key. Please check your API key in the sidebar.")
                                 st.info("💡 Get your API key from: https://platform.openai.com/account/api-keys")
+                            elif "429" in error_msg or "insufficient_quota" in error_msg or "quota" in error_msg.lower():
+                                st.error("❌ **OpenAI API Quota Exceeded**")
+                                st.warning("Your OpenAI API key has exceeded its quota or billing limit.")
+                                st.info("""
+                                **To fix this:**
+                                1. **Add credits** to your OpenAI account: https://platform.openai.com/account/billing
+                                2. **Check your usage** and billing: https://platform.openai.com/usage
+                                3. **Or remove the API key** from the sidebar to use the app with SentenceTransformers (embeddings only)
+                                
+                                **Note:** The app currently requires OpenAI API for generating answers, but embeddings can use SentenceTransformers (free).
+                                """)
                             else:
                                 st.error(f"❌ Error creating LLM: {error_msg[:300]}")
     
