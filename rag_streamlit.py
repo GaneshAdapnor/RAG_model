@@ -19,6 +19,18 @@ from typing import List, Optional
 
 import streamlit as st
 
+# IMPORTANT: st.set_page_config must be the FIRST Streamlit command
+# This must be called before any other Streamlit commands (st.error, st.stop, etc.)
+try:
+    st.set_page_config(
+        page_title="RAG PDF Q&A System",
+        page_icon="📚",
+        layout="wide"
+    )
+except Exception:
+    # If page config already set, continue
+    pass
+
 # Text splitter - try newer import first, fallback to older
 try:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -388,18 +400,8 @@ def format_source_docs(source_docs: List[Document]) -> str:
 
 def main():
     """Main Streamlit application."""
-    try:
-        st.set_page_config(
-            page_title="RAG PDF Q&A System",
-            page_icon="📚",
-            layout="wide"
-        )
-        
-        st.title("📚 Retrieval-Augmented Generation (RAG) PDF Q&A System")
-        st.markdown("Upload PDF files and ask questions based on their contents.")
-    except Exception as e:
-        # If page config already set, continue
-        pass
+    st.title("📚 Retrieval-Augmented Generation (RAG) PDF Q&A System")
+    st.markdown("Upload PDF files and ask questions based on their contents.")
     
     # Sidebar for configuration
     with st.sidebar:
