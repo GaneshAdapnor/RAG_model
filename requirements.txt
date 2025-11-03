@@ -18,9 +18,10 @@ PyPDF2>=3.0.0
 
 # Embeddings
 openai>=1.0.0
+
+# SentenceTransformers - with minimal torch dependency
+# Note: torch is installed automatically by sentence-transformers
 sentence-transformers>=2.2.0
-torch>=2.0.0
 
 # Utilities
 python-dotenv>=1.0.0
-
