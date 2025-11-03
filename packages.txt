@@ -1,3 +1,0 @@
-# System packages for Streamlit Cloud
-# Leave empty unless you need specific system packages
-# Example: python3-dev, build-essential, etc.
