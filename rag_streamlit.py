@@ -606,39 +606,6 @@ def main():
                     llm_provider = st.session_state.get("llm_provider", "openai")
                     llm_model = st.session_state.get("llm_model", "gpt-4o-mini")
                     
-                    if llm_provider == "openai":
-                        # Use OpenAI
-                        if not OPENAI_LLM_AVAILABLE:
-                            st.error("❌ OpenAI LLM not available. Please install langchain-community.")
-                        else:
-                            api_key = os.getenv("OPENAI_API_KEY") or st.session_state.get("openai_api_key")
-                            if not api_key:
-                                st.error("❌ OpenAI API key required. Please set it in the sidebar.")
-                            else:
-                                try:
-                                    llm = ChatOpenAI(
-                                        model=llm_model,
-                                        temperature=0.0,
-                                        openai_api_key=api_key
-                                    )
-                    
-                    elif llm_provider == "gemini":
-                        # Use Gemini
-                        if not GEMINI_AVAILABLE:
-                            st.error("❌ Gemini LLM not available. Please install langchain-google-genai.")
-                        else:
-                            api_key = os.getenv("GOOGLE_API_KEY") or st.session_state.get("gemini_api_key")
-                            if not api_key:
-                                st.error("❌ Gemini API key required. Please set it in the sidebar.")
-                                st.info("💡 Get your free API key from: https://aistudio.google.com/apikey")
-                            else:
-                                try:
-                                    llm = ChatGoogleGenerativeAI(
-                                        model=llm_model,
-                                        temperature=0.0,
-                                        google_api_key=api_key
-                                    )
-                    
                     # Initialize LLM variable
                     llm = None
                     llm_created = False
