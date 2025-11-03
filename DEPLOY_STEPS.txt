@@ -1,0 +1,33 @@
+================================================================================
+🚀 DEPLOY TO STREAMLIT CLOUD - COPY THESE STEPS
+================================================================================
+
+YOUR REPOSITORY: https://github.com/GaneshAdapnor/RAG_model.git
+
+STEP 1: Open Streamlit Cloud
+   → Go to: https://share.streamlit.io
+   → Sign in with GitHub
+
+STEP 2: Create New App
+   → Click "New app" button
+
+STEP 3: Fill in the Form
+   Repository: GaneshAdapnor/RAG_model
+   Branch: main
+   Main file path: rag_streamlit.py
+   App URL: (choose a name like "rag-pdf-qa")
+
+STEP 4: Optional - Add API Key
+   → Click "Advanced settings"
+   → Click "Secrets"
+   → Add:
+      OPENAI_API_KEY = "your-key-here"
+   (Skip this if you want free SentenceTransformers)
+
+STEP 5: Deploy
+   → Click "Deploy" button
+   → Wait 2-5 minutes
+
+DONE! Your app will be at: https://YOUR-APP-NAME.streamlit.app
+
+================================================================================
