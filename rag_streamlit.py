@@ -409,11 +409,12 @@ def main():
             os.environ["GOOGLE_API_KEY"] = gemini_key
         
         # LLM Model selection for Gemini
+        # Using models that work with current API
         gemini_model = st.selectbox(
             "Gemini Model",
-            ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"],
-            index=0,
-            help="Gemini model for generating answers (gemini-1.5-flash is recommended)"
+            ["gemini-pro", "gemini-1.5-pro-latest", "gemini-1.5-flash-latest"],
+            index=2,
+            help="Gemini model for generating answers (gemini-1.5-flash-latest is recommended)"
         )
         st.session_state["llm_model"] = gemini_model
         st.session_state["llm_provider"] = "gemini"
@@ -534,13 +535,19 @@ def main():
                 with st.spinner("🔍 Searching documents and generating answer..."):
                     # Get LLM based on provider (only Gemini)
                     llm_provider = st.session_state.get("llm_provider", "gemini")
-                    llm_model = st.session_state.get("llm_model", "gemini-1.5-flash")
+                    llm_model = st.session_state.get("llm_model", "gemini-1.5-flash-latest")
                     
-                    # Ensure model is valid (remove deprecated gemini-pro)
-                    if llm_model == "gemini-pro":
-                        llm_model = "gemini-1.5-flash"
+                    # Map model names to correct format
+                    model_mapping = {
+                        "gemini-1.5-flash": "gemini-1.5-flash-latest",
+                        "gemini-1.5-pro": "gemini-1.5-pro-latest",
+                        "gemini-2.0-flash-exp": "gemini-1.5-flash-latest"  # Fallback
+                    }
+                    
+                    # Use mapped model name if available
+                    if llm_model in model_mapping:
+                        llm_model = model_mapping[llm_model]
                         st.session_state["llm_model"] = llm_model
-                        st.warning("⚠️ gemini-pro is deprecated. Using gemini-1.5-flash instead.")
                     
                     # Initialize LLM variable
                     llm = None
@@ -556,10 +563,13 @@ def main():
                             st.info("💡 Get your free API key from: https://aistudio.google.com/apikey")
                         else:
                             try:
+                                # Create LLM instance with correct model name
+                                # Try different model name formats if needed
                                 llm = ChatGoogleGenerativeAI(
                                     model=llm_model,
                                     temperature=0.0,
-                                    google_api_key=api_key
+                                    google_api_key=api_key,
+                                    convert_system_message_to_human=True
                                 )
                                 llm_created = True
                             except Exception as e:
