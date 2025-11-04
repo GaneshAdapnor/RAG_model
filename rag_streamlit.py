@@ -2,7 +2,7 @@
 Retrieval-Augmented Generation (RAG) System with Streamlit Interface
 
 This application allows users to upload PDF files and ask questions based on their contents.
-It uses LangChain for retrieval and QA, FAISS for vector storage, and OpenAI/SentenceTransformers for embeddings.
+It uses LangChain for retrieval and QA, FAISS for vector storage, Google Gemini for document answering, and SentenceTransformers for embeddings.
 """
 
 import os
@@ -10,6 +10,13 @@ import hashlib
 import pickle
 from pathlib import Path
 from typing import List, Optional
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed, continue without it
 
 # Optional: Proxy support via environment variables
 # If you need proxy support, set these before running:
@@ -48,13 +55,6 @@ try:
 except ImportError:
     st.error("❌ Could not import FAISS. Please install langchain-community and faiss-cpu.")
     st.stop()
-
-# Chat models - with error handling
-try:
-    from langchain_community.chat_models import ChatOpenAI
-    OPENAI_LLM_AVAILABLE = True
-except ImportError:
-    OPENAI_LLM_AVAILABLE = False
 
 # Google Gemini - try to import
 try:
@@ -102,18 +102,6 @@ except ImportError:
     PYPDF2_AVAILABLE = False
 
 # Embeddings
-# Use langchain_openai for OpenAIEmbeddings (recommended, newer package)
-try:
-    from langchain_openai import OpenAIEmbeddings
-    OPENAI_EMBEDDINGS_AVAILABLE = True
-except ImportError:
-    # Fallback to langchain_community if langchain_openai not available
-    try:
-        from langchain_community.embeddings import OpenAIEmbeddings
-        OPENAI_EMBEDDINGS_AVAILABLE = True
-    except ImportError:
-        OPENAI_EMBEDDINGS_AVAILABLE = False
-
 try:
     from langchain_community.embeddings import HuggingFaceEmbeddings
     SENTENCE_TRANSFORMERS_AVAILABLE = True
@@ -246,28 +234,13 @@ def extract_text_from_pdf(file_bytes: bytes, filename: str) -> List[Document]:
 
 def get_embeddings():
     """
-    Get embeddings model - OpenAI if API key available, otherwise SentenceTransformers.
+    Get embeddings model - uses SentenceTransformers (free, runs locally).
     
     Note: Proxy support (if needed) via environment variables:
     - HTTP_PROXY=http://your.proxy:port
     - HTTPS_PROXY=http://your.proxy:port
-    Do NOT use proxies= parameter (not supported in new OpenAI SDK).
     """
-    # Try OpenAI first if API key is available (check both embeddings key and general OpenAI key)
-    if OPENAI_EMBEDDINGS_AVAILABLE:
-        api_key = (
-            st.session_state.get("embeddings_openai_key") or 
-            os.getenv("OPENAI_API_KEY") or 
-            st.session_state.get("openai_api_key")
-        )
-        if api_key:
-            # Create embeddings instance (we'll catch errors during actual use)
-            return OpenAIEmbeddings(
-                model="text-embedding-3-large",
-                openai_api_key=api_key
-            )
-    
-    # Fallback to SentenceTransformers
+    # Use SentenceTransformers for embeddings
     if SENTENCE_TRANSFORMERS_AVAILABLE:
         st.info("📦 Using SentenceTransformers embeddings (free, runs locally).")
         return HuggingFaceEmbeddings(
@@ -275,7 +248,7 @@ def get_embeddings():
             model_kwargs={"device": "cpu"}
         )
     
-    st.error("❌ No embeddings model available. Please install sentence-transformers or set a valid OPENAI_API_KEY.")
+    st.error("❌ No embeddings model available. Please install sentence-transformers.")
     return None
 
 
@@ -423,74 +396,34 @@ def main():
     with st.sidebar:
         st.header("⚙️ Configuration")
         
-        # LLM Provider selection
-        llm_provider = st.selectbox(
-            "LLM Provider",
-            ["OpenAI", "Google Gemini"] if (OPENAI_LLM_AVAILABLE and GEMINI_AVAILABLE) else (["OpenAI"] if OPENAI_LLM_AVAILABLE else ["Google Gemini"] if GEMINI_AVAILABLE else []),
-            index=0,
-            help="Choose which LLM provider to use for generating answers"
-        )
-        
-        # API Key inputs based on provider
-        if llm_provider == "OpenAI":
-            openai_key = st.text_input(
-                "OpenAI API Key",
-                type="password",
-                help="Leave empty to use SentenceTransformers embeddings only",
-                value=st.session_state.get("openai_api_key", "")
-            )
-            if openai_key:
-                st.session_state["openai_api_key"] = openai_key
-                os.environ["OPENAI_API_KEY"] = openai_key
-            
-            # LLM Model selection for OpenAI
-            llm_model = st.selectbox(
-                "OpenAI Model",
-                ["gpt-4-turbo-preview", "gpt-4", "gpt-3.5-turbo", "gpt-4o", "gpt-4o-mini"],
-                index=4,
-                help="OpenAI model for generating answers"
-            )
-            st.session_state["llm_model"] = llm_model
-            st.session_state["llm_provider"] = "openai"
-        
-        elif llm_provider == "Google Gemini":
-            gemini_key = st.text_input(
-                "Google Gemini API Key",
-                type="password",
-                help="Get your API key from: https://aistudio.google.com/apikey",
-                value=st.session_state.get("gemini_api_key", "")
-            )
-            if gemini_key:
-                st.session_state["gemini_api_key"] = gemini_key
-                os.environ["GOOGLE_API_KEY"] = gemini_key
-            
-            # LLM Model selection for Gemini
-            gemini_model = st.selectbox(
-                "Gemini Model",
-                ["gemini-pro", "gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash-exp"],
-                index=2,
-                help="Gemini model for generating answers"
-            )
-            st.session_state["llm_model"] = gemini_model
-            st.session_state["llm_provider"] = "gemini"
-            
-            if not gemini_key:
-                st.info("💡 **Free Gemini API**: Get your free API key from [Google AI Studio](https://aistudio.google.com/apikey)")
-        
-        # OpenAI API Key for embeddings (separate from LLM)
-        st.divider()
-        st.subheader("Embeddings (Optional)")
-        embeddings_openai_key = st.text_input(
-            "OpenAI API Key (for embeddings)",
+        # Gemini API Key
+        st.subheader("Google Gemini API")
+        gemini_key = st.text_input(
+            "Google Gemini API Key",
             type="password",
-            help="Leave empty to use SentenceTransformers (free, local)",
-            value=st.session_state.get("embeddings_openai_key", "")
+            help="Get your API key from: https://aistudio.google.com/apikey",
+            value=st.session_state.get("gemini_api_key", os.getenv("GOOGLE_API_KEY", ""))
         )
-        if embeddings_openai_key:
-            st.session_state["embeddings_openai_key"] = embeddings_openai_key
-            # Use embeddings key if LLM is not OpenAI
-            if llm_provider != "OpenAI":
-                os.environ["OPENAI_API_KEY"] = embeddings_openai_key
+        if gemini_key:
+            st.session_state["gemini_api_key"] = gemini_key
+            os.environ["GOOGLE_API_KEY"] = gemini_key
+        
+        # LLM Model selection for Gemini
+        gemini_model = st.selectbox(
+            "Gemini Model",
+            ["gemini-pro", "gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash-exp"],
+            index=2,
+            help="Gemini model for generating answers"
+        )
+        st.session_state["llm_model"] = gemini_model
+        st.session_state["llm_provider"] = "gemini"
+        
+        if not gemini_key:
+            st.info("💡 **Free Gemini API**: Get your free API key from [Google AI Studio](https://aistudio.google.com/apikey)")
+        
+        st.divider()
+        st.subheader("Embeddings")
+        st.info("📦 Using SentenceTransformers (free, runs locally) for document embeddings.")
         
         st.divider()
         
@@ -559,11 +492,8 @@ def main():
                                 st.success("✅ Documents processed and ready for Q&A!")
                             except Exception as e:
                                 error_msg = str(e)
-                                if "401" in error_msg or "invalid_api_key" in error_msg or "AuthenticationError" in error_msg:
-                                    st.error("❌ Invalid OpenAI API key. Please check your API key in the sidebar.")
-                                    st.info("💡 The app will use SentenceTransformers if you remove the invalid API key.")
-                                else:
-                                    st.error(f"❌ Error creating embeddings: {error_msg[:200]}")
+                                st.error(f"❌ Error creating embeddings: {error_msg[:200]}")
+                                st.info("💡 Make sure sentence-transformers is installed: pip install sentence-transformers")
                         else:
                             st.error("❌ Failed to create embeddings. Please check your configuration.")
                 else:
@@ -602,54 +532,33 @@ def main():
                 st.warning("Please enter a question.")
             else:
                 with st.spinner("🔍 Searching documents and generating answer..."):
-                    # Get LLM based on provider
-                    llm_provider = st.session_state.get("llm_provider", "openai")
-                    llm_model = st.session_state.get("llm_model", "gpt-4o-mini")
+                    # Get LLM based on provider (only Gemini)
+                    llm_provider = st.session_state.get("llm_provider", "gemini")
+                    llm_model = st.session_state.get("llm_model", "gemini-1.5-flash")
                     
                     # Initialize LLM variable
                     llm = None
                     llm_created = False
                     
-                    if llm_provider == "openai":
-                        # Use OpenAI
-                        if not OPENAI_LLM_AVAILABLE:
-                            st.error("❌ OpenAI LLM not available. Please install langchain-community.")
+                    # Use Gemini
+                    if not GEMINI_AVAILABLE:
+                        st.error("❌ Gemini LLM not available. Please install langchain-google-genai.")
+                    else:
+                        api_key = os.getenv("GOOGLE_API_KEY") or st.session_state.get("gemini_api_key")
+                        if not api_key:
+                            st.error("❌ Gemini API key required. Please set it in the sidebar.")
+                            st.info("💡 Get your free API key from: https://aistudio.google.com/apikey")
                         else:
-                            api_key = os.getenv("OPENAI_API_KEY") or st.session_state.get("openai_api_key")
-                            if not api_key:
-                                st.error("❌ OpenAI API key required. Please set it in the sidebar.")
-                            else:
-                                try:
-                                    llm = ChatOpenAI(
-                                        model=llm_model,
-                                        temperature=0.0,
-                                        openai_api_key=api_key
-                                    )
-                                    llm_created = True
-                                except Exception as e:
-                                    error_msg = str(e)
-                                    st.error(f"❌ Error creating OpenAI LLM: {error_msg[:300]}")
-                    
-                    elif llm_provider == "gemini":
-                        # Use Gemini
-                        if not GEMINI_AVAILABLE:
-                            st.error("❌ Gemini LLM not available. Please install langchain-google-genai.")
-                        else:
-                            api_key = os.getenv("GOOGLE_API_KEY") or st.session_state.get("gemini_api_key")
-                            if not api_key:
-                                st.error("❌ Gemini API key required. Please set it in the sidebar.")
-                                st.info("💡 Get your free API key from: https://aistudio.google.com/apikey")
-                            else:
-                                try:
-                                    llm = ChatGoogleGenerativeAI(
-                                        model=llm_model,
-                                        temperature=0.0,
-                                        google_api_key=api_key
-                                    )
-                                    llm_created = True
-                                except Exception as e:
-                                    error_msg = str(e)
-                                    st.error(f"❌ Error creating Gemini LLM: {error_msg[:300]}")
+                            try:
+                                llm = ChatGoogleGenerativeAI(
+                                    model=llm_model,
+                                    temperature=0.0,
+                                    google_api_key=api_key
+                                )
+                                llm_created = True
+                            except Exception as e:
+                                error_msg = str(e)
+                                st.error(f"❌ Error creating Gemini LLM: {error_msg[:300]}")
                     
                     # If LLM is created, proceed with answer generation
                     if llm_created and llm:
@@ -680,53 +589,32 @@ def main():
                                             st.divider()
                             except Exception as e:
                                 error_msg = str(e)
-                                if llm_provider == "openai":
-                                    if "401" in error_msg or "invalid_api_key" in error_msg or "AuthenticationError" in error_msg:
-                                        st.error("❌ Invalid OpenAI API key. Please check your API key in the sidebar.")
-                                        st.info("💡 Get your API key from: https://platform.openai.com/account/api-keys")
-                                    elif "429" in error_msg or "insufficient_quota" in error_msg or "quota" in error_msg.lower():
-                                        st.error("❌ **OpenAI API Quota Exceeded**")
-                                        st.warning("Your OpenAI API key has exceeded its quota or billing limit.")
-                                        st.info("""
-                                        **To fix this:**
-                                        1. **Add credits** to your OpenAI account: https://platform.openai.com/account/billing
-                                        2. **Check your usage** and billing: https://platform.openai.com/usage
-                                        3. **Or switch to Gemini** - Select "Google Gemini" as LLM Provider in the sidebar (free tier available!)
-                                        """)
-                                    else:
-                                        st.error(f"❌ Error generating answer: {error_msg[:300]}")
-                                elif llm_provider == "gemini":
-                                    if "401" in error_msg or "invalid_api_key" in error_msg or "API_KEY_INVALID" in error_msg:
-                                        st.error("❌ Invalid Gemini API key. Please check your API key in the sidebar.")
-                                        st.info("💡 Get your free API key from: https://aistudio.google.com/apikey")
-                                    elif "429" in error_msg or "quota" in error_msg.lower() or "RATE_LIMIT" in error_msg:
-                                        st.error("❌ **Gemini API Rate Limit Exceeded**")
-                                        st.warning("You've hit the Gemini API rate limit.")
-                                        st.info("""
-                                        **To fix this:**
-                                        1. **Wait a few minutes** and try again
-                                        2. **Check your usage**: https://aistudio.google.com/app/apikey
-                                        3. **Or switch to OpenAI** - Select "OpenAI" as LLM Provider in the sidebar
-                                        """)
-                                    else:
-                                        st.error(f"❌ Error generating answer: {error_msg[:300]}")
+                                # Gemini error handling
+                                if "401" in error_msg or "invalid_api_key" in error_msg or "API_KEY_INVALID" in error_msg:
+                                    st.error("❌ Invalid Gemini API key. Please check your API key in the sidebar.")
+                                    st.info("💡 Get your free API key from: https://aistudio.google.com/apikey")
+                                elif "429" in error_msg or "quota" in error_msg.lower() or "RATE_LIMIT" in error_msg:
+                                    st.error("❌ **Gemini API Rate Limit Exceeded**")
+                                    st.warning("You've hit the Gemini API rate limit.")
+                                    st.info("""
+                                    **To fix this:**
+                                    1. **Wait a few minutes** and try again
+                                    2. **Check your usage**: https://aistudio.google.com/app/apikey
+                                    """)
                                 else:
                                     st.error(f"❌ Error generating answer: {error_msg[:300]}")
                         except Exception as e:
                             error_msg = str(e)
-                            if "401" in error_msg or "invalid_api_key" in error_msg or "AuthenticationError" in error_msg:
-                                st.error("❌ Invalid OpenAI API key. Please check your API key in the sidebar.")
-                                st.info("💡 Get your API key from: https://platform.openai.com/account/api-keys")
-                            elif "429" in error_msg or "insufficient_quota" in error_msg or "quota" in error_msg.lower():
-                                st.error("❌ **OpenAI API Quota Exceeded**")
-                                st.warning("Your OpenAI API key has exceeded its quota or billing limit.")
+                            if "401" in error_msg or "invalid_api_key" in error_msg or "API_KEY_INVALID" in error_msg:
+                                st.error("❌ Invalid Gemini API key. Please check your API key in the sidebar.")
+                                st.info("💡 Get your free API key from: https://aistudio.google.com/apikey")
+                            elif "429" in error_msg or "quota" in error_msg.lower() or "RATE_LIMIT" in error_msg:
+                                st.error("❌ **Gemini API Rate Limit Exceeded**")
+                                st.warning("You've hit the Gemini API rate limit.")
                                 st.info("""
                                 **To fix this:**
-                                1. **Add credits** to your OpenAI account: https://platform.openai.com/account/billing
-                                2. **Check your usage** and billing: https://platform.openai.com/usage
-                                3. **Or remove the API key** from the sidebar to use the app with SentenceTransformers (embeddings only)
-                                
-                                **Note:** The app currently requires OpenAI API for generating answers, but embeddings can use SentenceTransformers (free).
+                                1. **Wait a few minutes** and try again
+                                2. **Check your usage**: https://aistudio.google.com/app/apikey
                                 """)
                             else:
                                 st.error(f"❌ Error creating LLM: {error_msg[:300]}")
