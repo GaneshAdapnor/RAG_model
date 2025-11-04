@@ -409,12 +409,12 @@ def main():
             os.environ["GOOGLE_API_KEY"] = gemini_key
         
         # LLM Model selection for Gemini
-        # Using model names that work with current API
+        # Using model names that work with current API version
         gemini_model = st.selectbox(
             "Gemini Model",
-            ["gemini-pro", "models/gemini-pro", "gemini-1.5-pro", "gemini-1.5-flash"],
+            ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"],
             index=0,
-            help="Gemini model - try 'gemini-pro' first, then other options if needed"
+            help="Gemini model - gemini-1.5-flash is recommended (fast and reliable)"
         )
         st.session_state["llm_model"] = gemini_model
         st.session_state["llm_provider"] = "gemini"
@@ -535,7 +535,7 @@ def main():
                 with st.spinner("🔍 Searching documents and generating answer..."):
                     # Get LLM based on provider (only Gemini)
                     llm_provider = st.session_state.get("llm_provider", "gemini")
-                    llm_model = st.session_state.get("llm_model", "gemini-pro")
+                    llm_model = st.session_state.get("llm_model", "gemini-1.5-flash")
                     
                     # Try to use the model name as-is first
                     # If it fails, we'll handle it in the exception
@@ -567,25 +567,38 @@ def main():
                                 llm_created = True
                             except Exception as e:
                                 error_msg = str(e)
-                                # If it's a 404 model error, try gemini-pro as fallback
+                                # If it's a 404 model error, try gemini-1.5-flash as fallback
                                 if "404" in str(e) and "models" in str(e):
                                     try:
-                                        st.warning("⚠️ Model not found, trying 'gemini-pro' as fallback...")
+                                        st.warning("⚠️ Model not found, trying 'gemini-1.5-flash' as fallback...")
                                         llm = ChatGoogleGenerativeAI(
-                                            model="gemini-pro",
+                                            model="gemini-1.5-flash",
                                             temperature=0.0,
                                             google_api_key=api_key,
                                             convert_system_message_to_human=True
                                         )
                                         llm_created = True
-                                        st.session_state["llm_model"] = "gemini-pro"
-                                        st.success("✅ Using 'gemini-pro' model successfully!")
+                                        st.session_state["llm_model"] = "gemini-1.5-flash"
+                                        st.success("✅ Using 'gemini-1.5-flash' model successfully!")
                                     except Exception as e2:
-                                        st.error(f"❌ Error creating Gemini LLM: {str(e2)[:300]}")
-                                        st.info("💡 Try selecting 'gemini-pro' from the model dropdown.")
+                                        # Try gemini-1.5-pro as last resort
+                                        try:
+                                            st.warning("⚠️ Trying 'gemini-1.5-pro' as last resort...")
+                                            llm = ChatGoogleGenerativeAI(
+                                                model="gemini-1.5-pro",
+                                                temperature=0.0,
+                                                google_api_key=api_key,
+                                                convert_system_message_to_human=True
+                                            )
+                                            llm_created = True
+                                            st.session_state["llm_model"] = "gemini-1.5-pro"
+                                            st.success("✅ Using 'gemini-1.5-pro' model successfully!")
+                                        except Exception as e3:
+                                            st.error(f"❌ Error creating Gemini LLM: {str(e3)[:300]}")
+                                            st.info("💡 Please check your API key and try selecting 'gemini-1.5-flash' from the model dropdown.")
                                 else:
                                     st.error(f"❌ Error creating Gemini LLM: {error_msg[:300]}")
-                                    st.info("💡 Check your API key and try selecting a different model.")
+                                    st.info("💡 Check your API key and try selecting 'gemini-1.5-flash' from the model dropdown.")
                     
                     # If LLM is created, proceed with answer generation
                     if llm_created and llm:
