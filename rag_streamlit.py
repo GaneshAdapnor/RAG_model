@@ -409,12 +409,12 @@ def main():
             os.environ["GOOGLE_API_KEY"] = gemini_key
         
         # LLM Model selection for Gemini
-        # Using models that work with current API
+        # Using model names that work with current API
         gemini_model = st.selectbox(
             "Gemini Model",
-            ["gemini-pro", "gemini-1.5-pro-latest", "gemini-1.5-flash-latest"],
-            index=2,
-            help="Gemini model for generating answers (gemini-1.5-flash-latest is recommended)"
+            ["gemini-pro", "models/gemini-pro", "gemini-1.5-pro", "gemini-1.5-flash"],
+            index=0,
+            help="Gemini model - try 'gemini-pro' first, then other options if needed"
         )
         st.session_state["llm_model"] = gemini_model
         st.session_state["llm_provider"] = "gemini"
@@ -537,17 +537,8 @@ def main():
                     llm_provider = st.session_state.get("llm_provider", "gemini")
                     llm_model = st.session_state.get("llm_model", "gemini-1.5-flash-latest")
                     
-                    # Map model names to correct format
-                    model_mapping = {
-                        "gemini-1.5-flash": "gemini-1.5-flash-latest",
-                        "gemini-1.5-pro": "gemini-1.5-pro-latest",
-                        "gemini-2.0-flash-exp": "gemini-1.5-flash-latest"  # Fallback
-                    }
-                    
-                    # Use mapped model name if available
-                    if llm_model in model_mapping:
-                        llm_model = model_mapping[llm_model]
-                        st.session_state["llm_model"] = llm_model
+                    # Try to use the model name as-is first
+                    # If it fails, we'll handle it in the exception
                     
                     # Initialize LLM variable
                     llm = None
@@ -563,10 +554,12 @@ def main():
                             st.info("💡 Get your free API key from: https://aistudio.google.com/apikey")
                         else:
                             try:
-                                # Create LLM instance with correct model name
-                                # Try different model name formats if needed
+                                # Try creating LLM with the selected model
+                                # Remove "models/" prefix if present (LangChain handles it)
+                                clean_model = llm_model.replace("models/", "")
+                                
                                 llm = ChatGoogleGenerativeAI(
-                                    model=llm_model,
+                                    model=clean_model,
                                     temperature=0.0,
                                     google_api_key=api_key,
                                     convert_system_message_to_human=True
@@ -574,7 +567,25 @@ def main():
                                 llm_created = True
                             except Exception as e:
                                 error_msg = str(e)
-                                st.error(f"❌ Error creating Gemini LLM: {error_msg[:300]}")
+                                # If it's a 404 model error, try gemini-pro as fallback
+                                if "404" in str(e) and "models" in str(e):
+                                    try:
+                                        st.warning("⚠️ Model not found, trying 'gemini-pro' as fallback...")
+                                        llm = ChatGoogleGenerativeAI(
+                                            model="gemini-pro",
+                                            temperature=0.0,
+                                            google_api_key=api_key,
+                                            convert_system_message_to_human=True
+                                        )
+                                        llm_created = True
+                                        st.session_state["llm_model"] = "gemini-pro"
+                                        st.success("✅ Using 'gemini-pro' model successfully!")
+                                    except Exception as e2:
+                                        st.error(f"❌ Error creating Gemini LLM: {str(e2)[:300]}")
+                                        st.info("💡 Try selecting 'gemini-pro' from the model dropdown.")
+                                else:
+                                    st.error(f"❌ Error creating Gemini LLM: {error_msg[:300]}")
+                                    st.info("💡 Check your API key and try selecting a different model.")
                     
                     # If LLM is created, proceed with answer generation
                     if llm_created and llm:
