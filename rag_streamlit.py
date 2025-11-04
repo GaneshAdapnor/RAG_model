@@ -535,7 +535,7 @@ def main():
                 with st.spinner("🔍 Searching documents and generating answer..."):
                     # Get LLM based on provider (only Gemini)
                     llm_provider = st.session_state.get("llm_provider", "gemini")
-                    llm_model = st.session_state.get("llm_model", "gemini-1.5-flash-latest")
+                    llm_model = st.session_state.get("llm_model", "gemini-pro")
                     
                     # Try to use the model name as-is first
                     # If it fails, we'll handle it in the exception
