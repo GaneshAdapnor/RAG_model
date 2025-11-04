@@ -411,9 +411,9 @@ def main():
         # LLM Model selection for Gemini
         gemini_model = st.selectbox(
             "Gemini Model",
-            ["gemini-pro", "gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash-exp"],
-            index=2,
-            help="Gemini model for generating answers"
+            ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"],
+            index=0,
+            help="Gemini model for generating answers (gemini-1.5-flash is recommended)"
         )
         st.session_state["llm_model"] = gemini_model
         st.session_state["llm_provider"] = "gemini"
@@ -535,6 +535,12 @@ def main():
                     # Get LLM based on provider (only Gemini)
                     llm_provider = st.session_state.get("llm_provider", "gemini")
                     llm_model = st.session_state.get("llm_model", "gemini-1.5-flash")
+                    
+                    # Ensure model is valid (remove deprecated gemini-pro)
+                    if llm_model == "gemini-pro":
+                        llm_model = "gemini-1.5-flash"
+                        st.session_state["llm_model"] = llm_model
+                        st.warning("⚠️ gemini-pro is deprecated. Using gemini-1.5-flash instead.")
                     
                     # Initialize LLM variable
                     llm = None
