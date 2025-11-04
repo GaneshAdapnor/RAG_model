@@ -568,43 +568,28 @@ def main():
                                 question,
                                 llm
                             )
+                            
+                            # Display answer
+                            st.subheader("💡 Answer")
+                            st.write(answer)
+                            
+                            # Display sources
+                            if source_docs:
+                                st.subheader("📑 Source Documents")
+                                st.markdown(format_source_docs(source_docs))
                                 
-                                # Display answer
-                                st.subheader("💡 Answer")
-                                st.write(answer)
-                                
-                                # Display sources
-                                if source_docs:
-                                    st.subheader("📑 Source Documents")
-                                    st.markdown(format_source_docs(source_docs))
-                                    
-                                    # Show source details in expander
-                                    with st.expander("View detailed source information"):
-                                        for i, doc in enumerate(source_docs, 1):
-                                            st.markdown(f"**Source {i}:**")
-                                            st.markdown(f"- **File:** {doc.metadata.get('source', 'Unknown')}")
-                                            st.markdown(f"- **Page:** {doc.metadata.get('page', '?')}")
-                                            st.markdown(f"- **Content Preview:**")
-                                            st.text(doc.page_content[:500] + "..." if len(doc.page_content) > 500 else doc.page_content)
-                                            st.divider()
-                            except Exception as e:
-                                error_msg = str(e)
-                                # Gemini error handling
-                                if "401" in error_msg or "invalid_api_key" in error_msg or "API_KEY_INVALID" in error_msg:
-                                    st.error("❌ Invalid Gemini API key. Please check your API key in the sidebar.")
-                                    st.info("💡 Get your free API key from: https://aistudio.google.com/apikey")
-                                elif "429" in error_msg or "quota" in error_msg.lower() or "RATE_LIMIT" in error_msg:
-                                    st.error("❌ **Gemini API Rate Limit Exceeded**")
-                                    st.warning("You've hit the Gemini API rate limit.")
-                                    st.info("""
-                                    **To fix this:**
-                                    1. **Wait a few minutes** and try again
-                                    2. **Check your usage**: https://aistudio.google.com/app/apikey
-                                    """)
-                                else:
-                                    st.error(f"❌ Error generating answer: {error_msg[:300]}")
+                                # Show source details in expander
+                                with st.expander("View detailed source information"):
+                                    for i, doc in enumerate(source_docs, 1):
+                                        st.markdown(f"**Source {i}:**")
+                                        st.markdown(f"- **File:** {doc.metadata.get('source', 'Unknown')}")
+                                        st.markdown(f"- **Page:** {doc.metadata.get('page', '?')}")
+                                        st.markdown(f"- **Content Preview:**")
+                                        st.text(doc.page_content[:500] + "..." if len(doc.page_content) > 500 else doc.page_content)
+                                        st.divider()
                         except Exception as e:
                             error_msg = str(e)
+                            # Gemini error handling
                             if "401" in error_msg or "invalid_api_key" in error_msg or "API_KEY_INVALID" in error_msg:
                                 st.error("❌ Invalid Gemini API key. Please check your API key in the sidebar.")
                                 st.info("💡 Get your free API key from: https://aistudio.google.com/apikey")
@@ -617,7 +602,7 @@ def main():
                                 2. **Check your usage**: https://aistudio.google.com/app/apikey
                                 """)
                             else:
-                                st.error(f"❌ Error creating LLM: {error_msg[:300]}")
+                                st.error(f"❌ Error generating answer: {error_msg[:300]}")
     
     # Footer
     st.divider()
