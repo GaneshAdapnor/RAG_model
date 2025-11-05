@@ -611,18 +611,12 @@ def main():
                                             convert_system_message_to_human=True
                                         )
                                         
-                                        # Test the model by making a simple call
-                                        try:
-                                            test_response = llm.invoke("Hi")
-                                            llm_created = True
-                                            st.session_state["llm_model"] = model_name
-                                            if model_name != clean_model:
-                                                st.success(f"✅ Using '{model_name}' model successfully!")
-                                            break
-                                        except Exception as test_error:
-                                            # Model created but doesn't work - continue to next
-                                            last_error = str(test_error)
-                                            continue
+                                        # If we get here, model was created successfully
+                                        llm_created = True
+                                        st.session_state["llm_model"] = model_name
+                                        if model_name != clean_model:
+                                            st.success(f"✅ Using '{model_name}' model successfully!")
+                                        break
                                             
                                     except Exception as e_model:
                                         last_error = str(e_model)
