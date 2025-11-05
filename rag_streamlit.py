@@ -73,6 +73,14 @@ except ImportError:
         GEMINI_AVAILABLE = False
         CHAT_GOOGLE_GENERATIVE_AI = None
 
+# Also try to import google-generativeai directly for model listing
+try:
+    import google.generativeai as genai
+    GENAI_AVAILABLE = True
+except ImportError:
+    GENAI_AVAILABLE = False
+    genai = None
+
 # Note: RetrievalQA is deprecated in LangChain 1.0+
 # We'll use LCEL (LangChain Expression Language) approach instead
 
