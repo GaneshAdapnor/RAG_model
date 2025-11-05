@@ -432,11 +432,12 @@ def main():
         
         # LLM Model selection for Gemini
         # Using model names that work with current API version
+        # Note: gemini-pro is deprecated, removed from options
         gemini_model = st.selectbox(
             "Gemini Model",
-            ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"],
+            ["gemini-1.5-flash", "gemini-1.5-pro"],
             index=0,
-            help="Gemini model - gemini-1.5-flash is recommended (fast and reliable)"
+            help="Gemini model - gemini-1.5-flash is recommended (fast and reliable). gemini-pro is deprecated."
         )
         st.session_state["llm_model"] = gemini_model
         st.session_state["llm_provider"] = "gemini"
@@ -558,6 +559,11 @@ def main():
                     # Get LLM based on provider (only Gemini)
                     llm_provider = st.session_state.get("llm_provider", "gemini")
                     llm_model = st.session_state.get("llm_model", "gemini-1.5-flash")
+                    # Ensure deprecated models are replaced
+                    if llm_model == "gemini-pro":
+                        llm_model = "gemini-1.5-flash"
+                        st.session_state["llm_model"] = "gemini-1.5-flash"
+                        st.warning("⚠️ 'gemini-pro' is deprecated. Using 'gemini-1.5-flash' instead.")
                     
                     # Try to use the model name as-is first
                     # If it fails, we'll handle it in the exception
