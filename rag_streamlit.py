@@ -396,19 +396,16 @@ def main():
     if RecursiveCharacterTextSplitter is None:
         st.error("❌ Could not import RecursiveCharacterTextSplitter. Please install langchain-text-splitters.")
         st.info("💡 Run: pip install langchain-text-splitters")
-        st.stop()
         return
     
     if FAISS is None:
         st.error("❌ Could not import FAISS. Please install langchain-community and faiss-cpu.")
         st.info("💡 Run: pip install langchain-community faiss-cpu")
-        st.stop()
         return
     
     if Document is None:
         st.error("❌ Could not import Document. Please install langchain-core or langchain.")
         st.info("💡 Run: pip install langchain-core")
-        st.stop()
         return
     
     st.title("📚 Retrieval-Augmented Generation (RAG) PDF Q&A System")
@@ -680,6 +677,11 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         import traceback
+        # Ensure page config is set before showing errors
+        try:
+            st.set_page_config(page_title="RAG PDF Q&A System", page_icon="📚", layout="wide")
+        except:
+            pass
         st.error("❌ Application Error")
         st.code(str(e))
         st.code(traceback.format_exc())
