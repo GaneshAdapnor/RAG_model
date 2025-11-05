@@ -17,8 +17,27 @@ except ImportError:
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from backend.config import VECTOR_STORE_PATH, CHUNK_SIZE, CHUNK_OVERLAP, TOP_K
-from backend.llm_service import LLMService
+# Try to import from backend.config, fallback to defaults if not available
+try:
+    from backend.config import VECTOR_STORE_PATH, CHUNK_SIZE, CHUNK_OVERLAP, TOP_K
+except ImportError:
+    # Default values if backend.config is not available
+    VECTOR_STORE_PATH = "./backend/storage/faiss_index"
+    CHUNK_SIZE = 1000
+    CHUNK_OVERLAP = 200
+    TOP_K = 5
+
+# Try to import LLMService, but it's only used in backend context
+try:
+    from backend.llm_service import LLMService
+    LLM_SERVICE_AVAILABLE = True
+except ImportError:
+    LLM_SERVICE_AVAILABLE = False
+    # Create a dummy class to prevent errors
+    class LLMService:
+        @staticmethod
+        def get_embeddings():
+            raise NotImplementedError("LLMService not available in this context")
 
 class VectorStoreManager:
     """Manage FAISS vector store with persistence."""
@@ -53,6 +72,8 @@ class VectorStoreManager:
         """Load existing vector store from disk."""
         if self.vector_store_path.exists():
             try:
+                if not LLM_SERVICE_AVAILABLE:
+                    return False
                 embeddings = LLMService.get_embeddings()
                 self.vector_store = FAISS.load_local(
                     str(self.vector_store_path),
@@ -116,6 +137,8 @@ class VectorStoreManager:
             ))
         
         # Get embeddings
+        if not LLM_SERVICE_AVAILABLE:
+            raise NotImplementedError("LLMService not available. This module is for backend use only.")
         embeddings = LLMService.get_embeddings()
         
         # Add to vector store
