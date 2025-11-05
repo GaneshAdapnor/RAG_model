@@ -1,30 +1,26 @@
-# Streamlit RAG System - Dependencies for Streamlit Cloud Deployment
+# Streamlit RAG System - Optimized for Streamlit Cloud
 # Using Google Gemini API for document answering
 
 # Core dependencies
 streamlit>=1.28.0
 python-dotenv>=1.0.0
 
-# LangChain dependencies
-langchain>=1.0.0
-langchain-community>=0.4.0
-langchain-core>=1.0.0
-langchain-google-genai>=1.0.0
-langchain-text-splitters>=1.0.0
+# LangChain dependencies (compatible versions)
+langchain>=0.3.0
+langchain-community>=0.3.0
+langchain-core>=0.3.0
+langchain-google-genai>=2.0.0
+langchain-text-splitters>=0.3.0
 
 # Google Gemini API
 google-generativeai>=0.3.0
 
-# Vector store (lightweight version)
+# Vector store (compatible with Streamlit Cloud)
 faiss-cpu>=1.7.4
 
-# PDF processing (at least one needed - PyMuPDF is fastest)
+# PDF processing
 PyMuPDF>=1.23.0
 
-# Embeddings - Using SentenceTransformers (free, local)
-# Note: This is large but necessary for embeddings
-sentence-transformers>=2.2.0
-
-# Optional PDF processors (install if PyMuPDF fails)
-# pdfplumber>=0.10.0
-# PyPDF2>=3.0.0
+# Embeddings - SentenceTransformers
+# Note: This is large but required. Using compatible version.
+sentence-transformers>=2.2.0,<3.0.0
