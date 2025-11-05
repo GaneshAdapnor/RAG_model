@@ -53,9 +53,16 @@ Thumbs.db
 # Logs
 *.log
 
-# Node (if any)
+# Node (if any) - not needed for Streamlit deployment
 node_modules/
 npm-debug.log*
+package*.json
+*.jsx
+*.html
+tailwind.config.js
+postcss.config.js
+vite.config.js
+src/
 
 # Uploads
 uploads/
