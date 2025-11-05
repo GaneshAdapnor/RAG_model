@@ -46,15 +46,17 @@ except ImportError:
         # Fallback for older versions
         from langchain.text_splitter import RecursiveCharacterTextSplitter
     except ImportError:
-        st.error("❌ Could not import RecursiveCharacterTextSplitter. Please install langchain-text-splitters.")
-        st.stop()
+        # Don't use st.error here - it might cause white screen
+        # Just set a flag and handle in main()
+        RecursiveCharacterTextSplitter = None
 
 # Vector store - with error handling
 try:
     from langchain_community.vectorstores import FAISS
 except ImportError:
-    st.error("❌ Could not import FAISS. Please install langchain-community and faiss-cpu.")
-    st.stop()
+    # Don't use st.error here - it might cause white screen
+    # Just set a flag and handle in main()
+    FAISS = None
 
 # Google Gemini - try to import
 try:
@@ -79,8 +81,9 @@ except ImportError:
         # Fallback for older versions
         from langchain.schema import Document
     except ImportError:
-        st.error("❌ Could not import Document. Please install langchain-core or langchain.")
-        st.stop()
+        # Don't use st.error here - it might cause white screen
+        # Just set a flag and handle in main()
+        Document = None
 
 # PDF processing libraries
 try:
@@ -389,6 +392,25 @@ def format_source_docs(source_docs: List[Document]) -> str:
 
 def main():
     """Main Streamlit application."""
+    # Check for required imports at runtime (after page config is set)
+    if RecursiveCharacterTextSplitter is None:
+        st.error("❌ Could not import RecursiveCharacterTextSplitter. Please install langchain-text-splitters.")
+        st.info("💡 Run: pip install langchain-text-splitters")
+        st.stop()
+        return
+    
+    if FAISS is None:
+        st.error("❌ Could not import FAISS. Please install langchain-community and faiss-cpu.")
+        st.info("💡 Run: pip install langchain-community faiss-cpu")
+        st.stop()
+        return
+    
+    if Document is None:
+        st.error("❌ Could not import Document. Please install langchain-core or langchain.")
+        st.info("💡 Run: pip install langchain-core")
+        st.stop()
+        return
+    
     st.title("📚 Retrieval-Augmented Generation (RAG) PDF Q&A System")
     st.markdown("Upload PDF files and ask questions based on their contents.")
     
