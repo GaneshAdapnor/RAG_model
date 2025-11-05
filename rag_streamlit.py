@@ -424,7 +424,7 @@ def main():
             "Google Gemini API Key",
             type="password",
             help="Get your API key from: https://aistudio.google.com/apikey",
-            value=st.session_state.get("gemini_api_key", os.getenv("GOOGLE_API_KEY", ""))
+            value=st.session_state.get("gemini_api_key", st.secrets.get("GOOGLE_API_KEY", os.getenv("GOOGLE_API_KEY", "")))
         )
         if gemini_key:
             st.session_state["gemini_api_key"] = gemini_key
@@ -570,7 +570,8 @@ def main():
                     if not GEMINI_AVAILABLE:
                         st.error("❌ Gemini LLM not available. Please install langchain-google-genai.")
                     else:
-                        api_key = os.getenv("GOOGLE_API_KEY") or st.session_state.get("gemini_api_key")
+                        # Try to get API key from Streamlit secrets first (for Streamlit Cloud), then env var, then session state
+                        api_key = st.secrets.get("GOOGLE_API_KEY", None) or os.getenv("GOOGLE_API_KEY") or st.session_state.get("gemini_api_key")
                         if not api_key:
                             st.error("❌ Gemini API key required. Please set it in the sidebar.")
                             st.info("💡 Get your free API key from: https://aistudio.google.com/apikey")
