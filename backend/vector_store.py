@@ -6,7 +6,14 @@ from typing import List, Dict, Optional
 from datetime import datetime
 from pathlib import Path
 
-from langchain.schema import Document
+# Try newer import first, fallback to older
+try:
+    from langchain_core.documents import Document
+except ImportError:
+    try:
+        from langchain.schema import Document
+    except ImportError:
+        raise ImportError("Could not import Document. Please install langchain-core or langchain.")
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
