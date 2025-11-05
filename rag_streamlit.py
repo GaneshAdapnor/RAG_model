@@ -597,15 +597,18 @@ def main():
                                 # First, try the model name as-is
                                 clean_model = llm_model.replace("models/", "").strip()
                                 
-                                # List of models to try in order (most common working names)
+                                # List of models to try in order (current available models as of 2024/2025)
                                 models_to_try = [
                                     clean_model,  # Try selected model first
-                                    "gemini-1.5-flash",  # Most reliable
-                                    "gemini-1.5-pro",
-                                    "gemini-pro",
-                                    "models/gemini-1.5-flash",  # With prefix
-                                    "models/gemini-1.5-pro",
-                                    "models/gemini-pro"
+                                    "gemini-2.5-flash-lite",  # Latest recommended
+                                    "gemini-2.5-pro",  # Latest pro model
+                                    "gemini-1.5-flash",  # Fallback
+                                    "gemini-1.5-pro",  # Fallback
+                                    "gemini-pro",  # Legacy fallback
+                                    "models/gemini-2.5-flash-lite",  # With prefix
+                                    "models/gemini-2.5-pro",
+                                    "models/gemini-1.5-flash",
+                                    "models/gemini-1.5-pro"
                                 ]
                                 
                                 # Remove duplicates while preserving order
