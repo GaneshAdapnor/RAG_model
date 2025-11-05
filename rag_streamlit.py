@@ -62,13 +62,16 @@ except ImportError:
 try:
     from langchain_google_genai import ChatGoogleGenerativeAI
     GEMINI_AVAILABLE = True
+    CHAT_GOOGLE_GENERATIVE_AI = ChatGoogleGenerativeAI
 except ImportError:
     try:
         # Fallback to langchain_community if langchain_google_genai not available
         from langchain_community.chat_models import ChatGoogleGenerativeAI
         GEMINI_AVAILABLE = True
+        CHAT_GOOGLE_GENERATIVE_AI = ChatGoogleGenerativeAI
     except ImportError:
         GEMINI_AVAILABLE = False
+        CHAT_GOOGLE_GENERATIVE_AI = None
 
 # Note: RetrievalQA is deprecated in LangChain 1.0+
 # We'll use LCEL (LangChain Expression Language) approach instead
@@ -577,7 +580,7 @@ def main():
                                 # Remove "models/" prefix if present (LangChain handles it)
                                 clean_model = llm_model.replace("models/", "")
                                 
-                                llm = ChatGoogleGenerativeAI(
+                                llm = CHAT_GOOGLE_GENERATIVE_AI(
                                     model=clean_model,
                                     temperature=0.0,
                                     google_api_key=api_key,
@@ -590,7 +593,7 @@ def main():
                                 if "404" in str(e) and "models" in str(e):
                                     try:
                                         st.warning("⚠️ Model not found, trying 'gemini-1.5-flash' as fallback...")
-                                        llm = ChatGoogleGenerativeAI(
+                                        llm = CHAT_GOOGLE_GENERATIVE_AI(
                                             model="gemini-1.5-flash",
                                             temperature=0.0,
                                             google_api_key=api_key,
@@ -603,7 +606,7 @@ def main():
                                         # Try gemini-1.5-pro as last resort
                                         try:
                                             st.warning("⚠️ Trying 'gemini-1.5-pro' as last resort...")
-                                            llm = ChatGoogleGenerativeAI(
+                                            llm = CHAT_GOOGLE_GENERATIVE_AI(
                                                 model="gemini-1.5-pro",
                                                 temperature=0.0,
                                                 google_api_key=api_key,
