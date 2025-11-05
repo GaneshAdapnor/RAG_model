@@ -431,18 +431,34 @@ def main():
             os.environ["GOOGLE_API_KEY"] = gemini_key
         
         # LLM Model selection for Gemini
-        # Using simple model names that work with current API
+        # Using current available model names (as of 2024/2025)
         gemini_model = st.selectbox(
             "Gemini Model",
-            ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"],
+            ["gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"],
             index=0,
-            help="Gemini model - gemini-1.5-flash is recommended (fast and reliable). If models fail, try different ones."
+            help="Gemini model - gemini-2.5-flash-lite is recommended (latest, fast). If models fail, try different ones."
         )
         st.session_state["llm_model"] = gemini_model
         st.session_state["llm_provider"] = "gemini"
         
         if not gemini_key:
             st.info("💡 **Free Gemini API**: Get your free API key from [Google AI Studio](https://aistudio.google.com/apikey)")
+        else:
+            # Add button to list available models
+            if GENAI_AVAILABLE and st.button("🔍 List Available Models", help="Click to see which Gemini models are available with your API key"):
+                try:
+                    genai.configure(api_key=gemini_key)
+                    models = genai.list_models()
+                    available_models = [m.name.replace("models/", "") for m in models if "gemini" in m.name.lower() and "generateContent" in m.supported_generation_methods]
+                    if available_models:
+                        st.success("✅ Available Gemini models:")
+                        for model in available_models:
+                            st.write(f"  - `{model}`")
+                        st.info("💡 Use one of these model names if the dropdown models don't work.")
+                    else:
+                        st.warning("⚠️ No Gemini models found. Please check your API key.")
+                except Exception as e:
+                    st.error(f"❌ Error listing models: {str(e)[:200]}")
         
         st.divider()
         st.subheader("Embeddings")
@@ -604,6 +620,8 @@ def main():
                                         if model_name != clean_model:
                                             st.info(f"🔄 Trying model: {model_name}...")
                                         
+                                        # Try creating LLM with model name
+                                        # Note: LangChain handles the API version internally
                                         llm = CHAT_GOOGLE_GENERATIVE_AI(
                                             model=model_name,
                                             temperature=0.0,
