@@ -376,20 +376,11 @@ def render_sidebar(manager: VectorStoreManager):
             st.caption("No documents uploaded yet.")
         else:
             for doc_id, meta in docs.items():
-                with st.expander(f"📎 {meta.get('filename', 'unknown')}"):
-                    st.caption(
-                        f"{meta.get('file_type', '?').upper()} • "
-                        f"{meta.get('chunks', 0)} chunks • "
-                        f"{meta.get('text_length', 0):,} chars"
-                    )
-                    if meta.get("summary"):
-                        st.markdown("**Summary**")
-                        st.write(meta["summary"])
-                    if meta.get("key_points"):
-                        st.markdown("**Key points**")
-                        for point in meta["key_points"]:
-                            st.markdown(f"- {point}")
-                    if st.button("🗑️ Delete", key=f"del_{doc_id}", use_container_width=True):
+                name_col, delete_col = st.columns([4, 1])
+                with name_col:
+                    st.markdown(f"📎 {meta.get('filename', 'unknown')}")
+                with delete_col:
+                    if st.button("🗑️", key=f"del_{doc_id}", help="Delete this document"):
                         manager.remove_document(doc_id)
                         st.rerun()
 
@@ -489,7 +480,41 @@ def render_chat_tab(manager: VectorStoreManager):
         st.info("👆 Upload documents in the **Upload** tab first.")
         return
 
-    for turn in st.session_state.chat_history:
+    # A plain widget (not st.chat_input, which Streamlit always pins to the
+    # bottom of the viewport) so the question box stays fixed at the top of
+    # this tab, with newest-first history rendered below it.
+    with st.form(key="chat_form", clear_on_submit=True):
+        question = st.text_input(
+            "Ask a question",
+            placeholder="Ask a question about your documents...",
+            label_visibility="collapsed",
+        )
+        asked = st.form_submit_button("Ask", type="primary")
+
+    if asked and question:
+        if not st.session_state.api_keys:
+            st.error("🔑 AI isn't configured yet. Set the provider's API key in the app's environment or secrets.")
+        else:
+            with st.spinner("Thinking..."):
+                try:
+                    LLMService.set_api_keys(LLM_PROVIDER, st.session_state.api_keys)
+                    rag_chain = RAGChain(manager)
+                    result = rag_chain.answer_question(question)
+                    st.session_state.chat_history.append({
+                        "question": question,
+                        "answer": result["answer"],
+                        "sources": result["sources"],
+                    })
+                except Exception as exc:
+                    st.session_state.chat_history.append({
+                        "question": question,
+                        "answer": friendly_error_message(exc),
+                        "sources": [],
+                    })
+            st.rerun()
+
+    # Newest first — a stack, not a scrolling transcript.
+    for turn in reversed(st.session_state.chat_history):
         with st.chat_message("user"):
             st.write(turn["question"])
         with st.chat_message("assistant"):
@@ -499,45 +524,6 @@ def render_chat_tab(manager: VectorStoreManager):
                     for source in turn["sources"]:
                         st.markdown(f"**{source['filename']}** (chunk {source['chunk_index']})")
                         st.caption(source["content"])
-
-    question = st.chat_input("Ask a question about your documents...")
-    if not question:
-        return
-
-    if not st.session_state.api_keys:
-        st.error("🔑 AI isn't configured yet. Set the provider's API key in the app's environment or secrets.")
-        return
-
-    with st.chat_message("user"):
-        st.write(question)
-
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            try:
-                LLMService.set_api_keys(LLM_PROVIDER, st.session_state.api_keys)
-                rag_chain = RAGChain(manager)
-                result = rag_chain.answer_question(question)
-                answer = result["answer"]
-                sources = result["sources"]
-                st.write(answer)
-                if sources:
-                    with st.expander("📑 Sources"):
-                        for source in sources:
-                            st.markdown(f"**{source['filename']}** (chunk {source['chunk_index']})")
-                            st.caption(source["content"])
-                st.session_state.chat_history.append({
-                    "question": question,
-                    "answer": answer,
-                    "sources": sources,
-                })
-            except Exception as exc:
-                message = friendly_error_message(exc)
-                st.error(message)
-                st.session_state.chat_history.append({
-                    "question": question,
-                    "answer": message,
-                    "sources": [],
-                })
 
 
 # ---------------------------------------------------------------------------
