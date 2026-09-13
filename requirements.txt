@@ -1,5 +1,5 @@
 # RAG Document Q&A System - Streamlit UI over the backend/ core
-# LLM answering via Groq (Llama models); embeddings are local SentenceTransformers
+# LLM answering via OpenRouter (OpenAI-compatible API); embeddings are local SentenceTransformers
 
 # Core dependencies
 streamlit>=1.28.0
@@ -11,7 +11,10 @@ langchain-community>=0.3.0
 langchain-core>=0.3.0
 langchain-text-splitters>=0.3.0
 
-# Groq API
+# OpenRouter (OpenAI-compatible client) — primary provider
+langchain-openai>=0.2.0
+
+# Groq API (secondary/fallback provider, still supported)
 langchain-groq>=0.2.0
 groq>=0.11.0
 
