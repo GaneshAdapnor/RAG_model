@@ -1,6 +1,6 @@
 """Pydantic models for API requests and responses."""
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 
 class DocumentUploadResponse(BaseModel):
@@ -54,7 +54,7 @@ class DocumentsListResponse(BaseModel):
 
 class ConfigUpdateRequest(BaseModel):
     """Request to update LLM configuration."""
-    llm_provider: Optional[Literal["openai", "ollama"]] = None
+    llm_provider: Optional[Literal["groq", "openai", "ollama"]] = None
     openai_model: Optional[str] = None
     ollama_model: Optional[str] = None
     ollama_base_url: Optional[str] = None

@@ -2,7 +2,7 @@
 
 ## ✅ Your App is Ready!
 
-Your Streamlit app (`rag_streamlit.py`) is ready for deployment!
+Your Streamlit app (`rag_streamlit.py`) is ready for deployment! It uses OpenRouter for answering and summarizing, and local SentenceTransformers for embeddings.
 
 ## 📋 Deployment Steps
 
@@ -31,9 +31,10 @@ git push -u origin main
    - **App URL**: Choose a unique name (e.g., `rag-pdf-qa`)
 5. **Click "Advanced settings"** → **"Secrets"**:
    ```
-   GOOGLE_API_KEY = "your-gemini-api-key-here"
+   OPENROUTER_API_KEYS = "key-one,key-two,key-three"
    ```
-   **Get your free API key**: https://aistudio.google.com/apikey
+   (a single key works too: `OPENROUTER_API_KEY = "your-key"`)
+   **Get your free API key**: https://openrouter.ai/settings/keys
 6. **Click "Deploy"**
 
 ### Step 3: Wait for Deployment
@@ -48,19 +49,20 @@ git push -u origin main
 ✅ `requirements.txt` - All dependencies  
 ✅ `.streamlit/config.toml` - Streamlit configuration  
 
-## ⚙️ Required: Gemini API Key
+## ⚙️ Required: OpenRouter API Key
 
-You need to add your Gemini API key in Streamlit Cloud → Secrets:
+You need to add your OpenRouter API key in Streamlit Cloud → Secrets:
 
 ```
-GOOGLE_API_KEY = "your-gemini-api-key"
+OPENROUTER_API_KEYS = "key-one,key-two,key-three"
 ```
 
-**Get your free API key**: https://aistudio.google.com/apikey
+**Get your free API key**: https://openrouter.ai/settings/keys
 
-**Note**: 
+**Note**:
 - The app uses SentenceTransformers (free, local) for document embeddings
-- Gemini API is required for document answering
+- OpenRouter is required for answering questions and summarizing documents
+- Multiple comma-separated keys enable automatic failover if one hits a rate limit
 
 ## 🔄 Auto-Updates
 
@@ -74,11 +76,12 @@ git push
 
 ## 📚 Features
 
-- ✅ PDF document upload
-- ✅ Google Gemini API for document answering
+- ✅ Multi-format document upload (PDF, Word, TXT, Markdown, HTML, CSV, RTF)
+- ✅ OpenRouter API for document answering and summarization
 - ✅ SentenceTransformers for embeddings (free, local)
-- ✅ Source attribution
-- ✅ Caching for faster processing
+- ✅ Source attribution and chat history
+- ✅ Per-visitor session isolation
+- ✅ Automatic key failover on rate limits
 
 ## 🎯 Quick Access
 

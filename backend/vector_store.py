@@ -1,6 +1,7 @@
 """Vector store management with FAISS persistence."""
 import os
 import json
+import shutil
 import uuid
 from typing import List, Dict, Optional
 from datetime import datetime
@@ -19,10 +20,10 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Try to import from backend.config, fallback to defaults if not available
 try:
-    from backend.config import VECTOR_STORE_PATH, CHUNK_SIZE, CHUNK_OVERLAP, TOP_K
+    from backend.config import STORAGE_ROOT, CHUNK_SIZE, CHUNK_OVERLAP, TOP_K
 except ImportError:
     # Default values if backend.config is not available
-    VECTOR_STORE_PATH = "./backend/storage/faiss_index"
+    STORAGE_ROOT = Path("./backend/storage")
     CHUNK_SIZE = 1000
     CHUNK_OVERLAP = 200
     TOP_K = 5
@@ -40,11 +41,22 @@ except ImportError:
             raise NotImplementedError("LLMService not available in this context")
 
 class VectorStoreManager:
-    """Manage FAISS vector store with persistence."""
-    
-    def __init__(self):
-        self.vector_store_path = Path(VECTOR_STORE_PATH)
-        self.metadata_path = self.vector_store_path.parent / "metadata.json"
+    """Manage FAISS vector store with persistence.
+
+    Every instance is scoped to a `session_id` so that documents uploaded by
+    one visitor are never visible to another. Each session gets its own
+    directory under STORAGE_ROOT/sessions/<session_id>/, containing its own
+    FAISS index and metadata.json. Omitting session_id falls back to a
+    single shared "default" session, which is only appropriate for local,
+    single-user use (e.g. the standalone FastAPI backend run without a
+    session-aware client).
+    """
+
+    def __init__(self, session_id: str = "default"):
+        self.session_id = session_id
+        session_dir = Path(STORAGE_ROOT) / "sessions" / session_id
+        self.vector_store_path = session_dir / "faiss_index"
+        self.metadata_path = session_dir / "metadata.json"
         self.documents_metadata: Dict[str, Dict] = {}
         self.vector_store: Optional[FAISS] = None
         self._load_metadata()
@@ -166,22 +178,44 @@ class VectorStoreManager:
         return chunk_count
     
     def remove_document(self, doc_id: str) -> bool:
-        """Remove a document from the vector store."""
+        """Remove a document and rebuild the FAISS index without its chunks.
+
+        FAISS itself doesn't support deleting by metadata filter, so this
+        rebuilds the index from the remaining documents in the docstore.
+        Cheap enough for the per-session, moderate-document-count use case
+        this app targets.
+        """
         if doc_id not in self.documents_metadata:
             return False
-        
-        # Note: FAISS doesn't support removing individual documents easily
-        # For now, we'll mark it in metadata and rebuild on next use
-        # In production, you might want to rebuild the index
-        
+
         del self.documents_metadata[doc_id]
         self._save_metadata()
-        
-        # TODO: Implement proper document removal
-        # For now, we'll just remove from metadata
-        # A full rebuild would be needed for complete removal
-        
+
+        if self.vector_store is not None:
+            remaining_docs = [
+                doc for doc in self.vector_store.docstore._dict.values()
+                if doc.metadata.get("doc_id") != doc_id
+            ]
+            if remaining_docs:
+                embeddings = LLMService.get_embeddings()
+                self.vector_store = FAISS.from_documents(remaining_docs, embeddings)
+                self._save_vector_store()
+            else:
+                self.vector_store = None
+                self._delete_vector_store_files()
+
         return True
+
+    def clear_all(self):
+        """Remove every document, its vectors, and its metadata for this session."""
+        self.documents_metadata = {}
+        self._save_metadata()
+        self.vector_store = None
+        self._delete_vector_store_files()
+
+    def _delete_vector_store_files(self):
+        if self.vector_store_path.exists():
+            shutil.rmtree(self.vector_store_path, ignore_errors=True)
     
     def get_retriever(self, doc_ids: Optional[List[str]] = None):
         """Get a retriever from the vector store.
@@ -192,17 +226,12 @@ class VectorStoreManager:
         if self.vector_store is None:
             if not self._load_vector_store():
                 raise ValueError("No vector store available. Please upload documents first.")
-        
-        # Store doc_ids filter for post-retrieval filtering
-        # FAISS doesn't support metadata filtering directly
-        retriever = self.vector_store.as_retriever(
-            search_kwargs={"k": TOP_K * 2}  # Get more to filter down
-        )
-        
-        # Store filter for use in RAG chain
-        retriever.doc_ids_filter = doc_ids
-        
-        return retriever
+
+        # FAISS doesn't support metadata filtering directly, so we retrieve
+        # extra candidates and let the caller (e.g. RAGChain) filter by
+        # doc_ids from each Document's metadata after retrieval.
+        k = TOP_K * 2 if doc_ids else TOP_K
+        return self.vector_store.as_retriever(search_kwargs={"k": k})
     
     def get_documents_metadata(self) -> Dict[str, Dict]:
         """Get all documents metadata."""

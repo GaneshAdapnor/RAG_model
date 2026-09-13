@@ -35,6 +35,9 @@ wheels/
 *.faiss
 *.pkl
 
+# Runtime per-session storage (FAISS indexes, uploaded docs, metadata)
+backend/storage/
+
 # Environment variables
 .env
 .env.local

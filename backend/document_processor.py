@@ -32,6 +32,11 @@ import markdown
 import csv
 import io
 
+try:
+    from backend.config import MAX_FILE_SIZE_MB
+except ImportError:
+    MAX_FILE_SIZE_MB = 25
+
 class DocumentProcessor:
     """Process various document formats and extract text."""
     
@@ -174,7 +179,14 @@ class DocumentProcessor:
             Tuple of (extracted_text, file_type)
         """
         file_type = cls.get_file_type(filename)
-        
+
+        file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+        if file_size_mb > MAX_FILE_SIZE_MB:
+            raise ValueError(
+                f"File '{filename}' is {file_size_mb:.1f} MB, which exceeds the "
+                f"{MAX_FILE_SIZE_MB} MB limit."
+            )
+
         if file_type == 'pdf':
             text = cls.extract_text_from_pdf(file_path)
         elif file_type == 'docx':

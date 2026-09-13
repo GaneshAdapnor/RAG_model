@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 from typing import List
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -40,17 +40,27 @@ app.add_middleware(
 )
 
 # Initialize services
-vector_store_manager = VectorStoreManager()
 document_processor = DocumentProcessor()
-summarization_service = SummarizationService(vector_store_manager)
-rag_chain = RAGChain(vector_store_manager)
+
+# Vector store managers are scoped per session so that one caller's
+# documents are never visible to another's. Managers are cached in-memory
+# per session_id to avoid re-loading the FAISS index from disk on every
+# request.
+_session_managers: dict[str, VectorStoreManager] = {}
+
+
+def get_vector_store_manager(session_id: str) -> VectorStoreManager:
+    manager = _session_managers.get(session_id)
+    if manager is None:
+        manager = VectorStoreManager(session_id=session_id)
+        manager.initialize()
+        _session_managers[session_id] = manager
+    return manager
+
 
 # Initialize upload folder
 upload_path = Path(UPLOAD_FOLDER)
 upload_path.mkdir(parents=True, exist_ok=True)
-
-# Initialize vector store on startup
-vector_store_manager.initialize()
 
 
 @app.get("/")
@@ -72,10 +82,13 @@ async def root():
 @app.post("/api/upload", response_model=DocumentUploadResponse)
 async def upload_document(
     file: UploadFile = File(...),
-    auto_summarize: bool = Form(default=None)
+    auto_summarize: bool = Form(default=None),
+    session_id: str = Header(default="default", alias="X-Session-Id")
 ):
     """Upload and process a document."""
     try:
+        vector_store_manager = get_vector_store_manager(session_id)
+        summarization_service = SummarizationService(vector_store_manager)
         # Generate unique document ID
         doc_id = str(uuid.uuid4())
         
@@ -151,12 +164,18 @@ async def upload_document(
 
 
 @app.post("/api/query", response_model=QueryResponse)
-async def query_documents(request: QueryRequest):
+async def query_documents(
+    request: QueryRequest,
+    session_id: str = Header(default="default", alias="X-Session-Id")
+):
     """Ask a question about the documents."""
     try:
         if not request.question.strip():
             raise HTTPException(status_code=400, detail="Question cannot be empty")
-        
+
+        vector_store_manager = get_vector_store_manager(session_id)
+        rag_chain = RAGChain(vector_store_manager)
+
         # Check if vector store has documents
         metadata = vector_store_manager.get_documents_metadata()
         if not metadata:
@@ -183,9 +202,14 @@ async def query_documents(request: QueryRequest):
 
 
 @app.post("/api/summarize", response_model=SummarizeResponse)
-async def summarize_document(request: SummarizeRequest):
+async def summarize_document(
+    request: SummarizeRequest,
+    session_id: str = Header(default="default", alias="X-Session-Id")
+):
     """Generate or regenerate summary for a document."""
     try:
+        vector_store_manager = get_vector_store_manager(session_id)
+        summarization_service = SummarizationService(vector_store_manager)
         summary, key_points = summarization_service.summarize_document(
             doc_id=request.doc_id,
             max_length=request.max_length
@@ -211,9 +235,10 @@ async def summarize_document(request: SummarizeRequest):
 
 
 @app.get("/api/documents", response_model=DocumentsListResponse)
-async def list_documents():
-    """List all uploaded documents."""
+async def list_documents(session_id: str = Header(default="default", alias="X-Session-Id")):
+    """List all uploaded documents for the caller's session."""
     try:
+        vector_store_manager = get_vector_store_manager(session_id)
         metadata = vector_store_manager.get_documents_metadata()
         
         documents = []
@@ -238,9 +263,13 @@ async def list_documents():
 
 
 @app.delete("/api/documents/{doc_id}")
-async def delete_document(doc_id: str):
+async def delete_document(
+    doc_id: str,
+    session_id: str = Header(default="default", alias="X-Session-Id")
+):
     """Delete a document."""
     try:
+        vector_store_manager = get_vector_store_manager(session_id)
         # Remove from vector store
         success = vector_store_manager.remove_document(doc_id)
         

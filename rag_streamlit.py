@@ -1,719 +1,584 @@
 """
-Retrieval-Augmented Generation (RAG) System with Streamlit Interface
+Retrieval-Augmented Generation (RAG) System — Streamlit UI
 
-This application allows users to upload PDF files and ask questions based on their contents.
-It uses LangChain for retrieval and QA, FAISS for vector storage, Google Gemini for document answering, and SentenceTransformers for embeddings.
+Upload documents (PDF, Word, text, Markdown, HTML, CSV, RTF), get automatic
+summaries, and chat with your documents. Answering is powered by a
+background AI API (OpenRouter) plus FAISS for retrieval and local
+SentenceTransformers embeddings.
+
+This file is a thin UI layer over backend/*, which contains all the actual
+document processing, vector store, and RAG logic.
 """
 
 import os
-import hashlib
-import pickle
+import sys
+import uuid
+import tempfile
 from pathlib import Path
-from typing import List, Optional
 
-# Load environment variables from .env file
+# Load environment variables from .env file (local dev convenience)
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
-    pass  # python-dotenv not installed, continue without it
-
-# Optional: Proxy support via environment variables
-# If you need proxy support, set these before running:
-# os.environ["HTTP_PROXY"] = "http://127.0.0.1:8080"
-# os.environ["HTTPS_PROXY"] = "http://127.0.0.1:8080"
-# Or set them in your system environment variables
+    pass
 
 import streamlit as st
 
-# IMPORTANT: st.set_page_config must be the FIRST Streamlit command
-# This must be called before any other Streamlit commands (st.error, st.stop, etc.)
+# IMPORTANT: st.set_page_config must be the FIRST Streamlit command.
 try:
     st.set_page_config(
-        page_title="RAG PDF Q&A System",
+        page_title="RAG Document Q&A",
         page_icon="📚",
-        layout="wide"
+        layout="wide",
     )
 except Exception:
-    # If page config already set, continue
     pass
 
-# Text splitter - try newer import first, fallback to older
-try:
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-except ImportError:
+# Make sure the repo root is importable so `backend.*` resolves regardless
+# of the working directory Streamlit was launched from.
+sys.path.insert(0, str(Path(__file__).parent))
+
+from backend.config import MAX_FILE_SIZE_MB, AUTO_SUMMARIZE, LLM_PROVIDER
+from backend.document_processor import DocumentProcessor
+from backend.vector_store import VectorStoreManager
+from backend.llm_service import LLMService, OPENAI_COMPATIBLE_AVAILABLE, NoAPIKeysError, AllAPIKeysExhaustedError
+from backend.summarization import SummarizationService
+from backend.rag_chain import RAGChain
+
+# Which env var prefix to read API keys from, per provider. The active
+# provider is set via LLM_PROVIDER in backend/config.py (defaults to
+# "openrouter"). No model or provider choice is ever exposed in the UI —
+# it's a background implementation detail configured by the deployer.
+_PROVIDER_ENV_PREFIX = {
+    "openrouter": "OPENROUTER",
+    "groq": "GROQ",
+}
+
+SUPPORTED_FILE_TYPES = ["pdf", "docx", "txt", "md", "html", "htm", "csv", "rtf"]
+
+
+# ---------------------------------------------------------------------------
+# Session state / service wiring
+# ---------------------------------------------------------------------------
+
+def get_api_keys_from_env_or_secrets() -> list:
+    """Read the active provider's API keys, configured by the app owner via
+    Streamlit secrets or env vars (the recommended path for a deployed app)."""
+    prefix = _PROVIDER_ENV_PREFIX.get(LLM_PROVIDER, LLM_PROVIDER.upper())
+    keys_name, key_name = f"{prefix}_API_KEYS", f"{prefix}_API_KEY"
+    raw = ""
     try:
-        # Fallback for older versions
-        from langchain.text_splitter import RecursiveCharacterTextSplitter
-    except ImportError:
-        # Don't use st.error here - it might cause white screen
-        # Just set a flag and handle in main()
-        RecursiveCharacterTextSplitter = None
-
-# Vector store - with error handling
-try:
-    from langchain_community.vectorstores import FAISS
-except ImportError:
-    # Don't use st.error here - it might cause white screen
-    # Just set a flag and handle in main()
-    FAISS = None
-
-# Google Gemini - try to import
-try:
-    from langchain_google_genai import ChatGoogleGenerativeAI
-    GEMINI_AVAILABLE = True
-    CHAT_GOOGLE_GENERATIVE_AI = ChatGoogleGenerativeAI
-except ImportError:
-    try:
-        # Fallback to langchain_community if langchain_google_genai not available
-        from langchain_community.chat_models import ChatGoogleGenerativeAI
-        GEMINI_AVAILABLE = True
-        CHAT_GOOGLE_GENERATIVE_AI = ChatGoogleGenerativeAI
-    except ImportError:
-        GEMINI_AVAILABLE = False
-        CHAT_GOOGLE_GENERATIVE_AI = None
-
-# Also try to import google-generativeai directly for model listing
-try:
-    import google.generativeai as genai
-    GENAI_AVAILABLE = True
-except ImportError:
-    GENAI_AVAILABLE = False
-    genai = None
-
-# Note: RetrievalQA is deprecated in LangChain 1.0+
-# We'll use LCEL (LangChain Expression Language) approach instead
-
-# Document - try newer import first, fallback to older
-try:
-    from langchain_core.documents import Document
-except ImportError:
-    try:
-        # Fallback for older versions
-        from langchain.schema import Document
-    except ImportError:
-        # Don't use st.error here - it might cause white screen
-        # Just set a flag and handle in main()
-        Document = None
-
-# PDF processing libraries
-try:
-    import fitz  # PyMuPDF
-    PYMUPDF_AVAILABLE = True
-except ImportError:
-    PYMUPDF_AVAILABLE = False
-
-try:
-    import pdfplumber
-    PDFPLUMBER_AVAILABLE = True
-except ImportError:
-    PDFPLUMBER_AVAILABLE = False
-
-try:
-    from PyPDF2 import PdfReader
-    PYPDF2_AVAILABLE = True
-except ImportError:
-    PYPDF2_AVAILABLE = False
-
-# Embeddings
-try:
-    from langchain_community.embeddings import HuggingFaceEmbeddings
-    SENTENCE_TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    SENTENCE_TRANSFORMERS_AVAILABLE = False
-
-# Configuration
-CHUNK_SIZE = 1000
-CHUNK_OVERLAP = 200
-TOP_K = 5
-CACHE_DIR = Path(".rag_cache")
-EMBEDDINGS_CACHE_FILE = CACHE_DIR / "embeddings_cache.pkl"
-
-# Initialize cache directory (with error handling for Streamlit Cloud)
-try:
-    CACHE_DIR.mkdir(exist_ok=True)
-except Exception:
-    # If cache directory can't be created, continue anyway
-    pass
+        raw = st.secrets.get(keys_name, "") or st.secrets.get(key_name, "")
+    except Exception:
+        pass
+    if not raw:
+        raw = os.getenv(keys_name, "") or os.getenv(key_name, "")
+    return [k.strip() for k in raw.split(",") if k.strip()]
 
 
-def get_file_hash(file_bytes: bytes) -> str:
-    """Generate a hash for the file to use as cache key."""
-    return hashlib.md5(file_bytes).hexdigest()
+def init_session_state():
+    if "session_id" not in st.session_state:
+        st.session_state.session_id = str(uuid.uuid4())
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+    if "api_keys" not in st.session_state:
+        st.session_state.api_keys = get_api_keys_from_env_or_secrets()
 
 
-def extract_text_from_pdf_pymupdf(file_bytes: bytes, filename: str) -> List[Document]:
+# ---------------------------------------------------------------------------
+# Theming — neumorphic (soft UI): surfaces share the page's base color and
+# read as raised or inset purely through a pair of soft shadows, no visible
+# borders. The light/dark switch is pure CSS/HTML — a checkbox whose
+# :checked state is read by a `:has()` selector on the app's root container,
+# which then overrides the CSS custom properties for the whole subtree.
+# There is deliberately NO Streamlit widget, session_state, or rerun
+# involved in the switch itself: earlier attempts using st.toggle (with or
+# without st.fragment) kept desyncing other widgets (the file uploader) or
+# leaving stale/duplicate <style> blocks behind, because every one of those
+# depended on a script rerun actually re-executing the right code at the
+# right time. A pure client-side toggle has no such race to get wrong.
+# ---------------------------------------------------------------------------
+
+_THEME_CSS = """
+<style>
+:root {
+    --app-bg: #e6e7ee;
+    --app-text: #2c2c3a;
+    --app-muted: #6b6b7b;
+    --app-accent: #6C5CE7;
+    --app-accent-text: #ffffff;
+    --shadow-light: #ffffff;
+    --shadow-dark: #b8bac2;
+}
+[data-testid="stApp"]:has(#theme-toggle-checkbox:checked) {
+    --app-bg: #2b2f3a;
+    --app-text: #eceaf5;
+    --app-muted: #9a9bb0;
+    --app-accent: #8b7cf6;
+    --app-accent-text: #12111a;
+    --shadow-light: #363b48;
+    --shadow-dark: #1e212a;
+}
+
+[data-testid="stAppViewContainer"],
+[data-testid="stHeader"],
+[data-testid="stSidebar"],
+[data-testid="stMain"],
+[data-testid="stMainBlockContainer"],
+[data-testid="stBottom"],
+[data-testid="stBottomBlockContainer"] {
+    background-color: var(--app-bg) !important;
+}
+/* Color only actual text-bearing tags, not every descendant — forcing
+   color on `*` bled into Streamlit's internal file-chip icon (an
+   svg/masked element) and broke its rendering. */
+[data-testid="stAppViewContainer"] :is(p, span, label, li, small, strong, em, code, a, h1, h2, h3, h4, h5, h6, td, th),
+[data-testid="stSidebar"] :is(p, span, label, li, small, strong, em, code, a, h1, h2, h3, h4, h5, h6, td, th),
+[data-testid="stBottom"] :is(p, span, label, li, small, strong, em, code, a, h1, h2, h3, h4, h5, h6, td, th) {
+    color: var(--app-text);
+}
+/* The uploaded-file row's filename has no stable data-testid in this
+   Streamlit version — target it structurally within the dropzone instead
+   so it stays legible in dark mode. */
+[data-testid="stFileUploaderDropzone"] ~ div span,
+[data-testid="stFileUploaderDropzone"] ~ div small {
+    color: var(--app-text) !important;
+}
+
+h1, h2, h3 {
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+[data-testid="stCaptionContainer"], .stCaption, small {
+    color: var(--app-muted) !important;
+}
+
+hr, [data-testid="stDivider"] {
+    border: none !important;
+    border-top: 1px solid var(--shadow-dark) !important;
+}
+
+/* Neumorphic raised surfaces: file uploader, expanders, chat bubbles, status widgets */
+[data-testid="stFileUploaderDropzone"],
+[data-testid="stExpander"],
+[data-testid="stChatMessage"],
+[data-testid="stStatusWidget"],
+[data-testid="stChatInput"],
+div[data-baseweb="notification"] {
+    background-color: var(--app-bg) !important;
+    border: none !important;
+    border-radius: 16px !important;
+    box-shadow: 6px 6px 12px var(--shadow-dark), -6px -6px 12px var(--shadow-light);
+}
+
+/* Expander header: Streamlit applies its own hover highlight (a light
+   overlay) that isn't theme-aware, washing out text in dark mode. Force
+   it transparent so only our own themed background ever shows through. */
+[data-testid="stExpander"] summary,
+[data-testid="stExpander"] summary:hover,
+[data-testid="stExpander"] summary:focus,
+[data-testid="stExpander"] [role="button"],
+[data-testid="stExpander"] [role="button"]:hover,
+[data-testid="stExpander"] [role="button"]:focus {
+    background-color: transparent !important;
+    color: var(--app-text) !important;
+}
+[data-testid="stExpander"] summary svg,
+[data-testid="stExpander"] [role="button"] svg {
+    fill: var(--app-text) !important;
+}
+
+/* The actual editable elements (textarea/input) — and every wrapper div
+   BaseWeb nests them inside — keep their own light/translucent fill by
+   default, which doesn't match our theme background. Force every layer,
+   not just the textarea itself, since BaseWeb wraps inputs in 2-3 nested
+   divs that each can carry their own background. */
+[data-testid="stChatInputTextArea"],
+[data-testid="stChatInput"] textarea,
+[data-testid="stChatInput"] div,
+[data-testid="stTextInput"] input,
+[data-testid="stTextInput"] div {
+    background-color: var(--app-bg) !important;
+    color: var(--app-text) !important;
+    -webkit-text-fill-color: var(--app-text) !important;
+    caret-color: var(--app-text) !important;
+}
+[data-testid="stChatInputTextArea"]::placeholder,
+[data-testid="stChatInput"] textarea::placeholder,
+[data-testid="stTextInput"] input::placeholder {
+    color: var(--app-muted) !important;
+    opacity: 1 !important;
+}
+
+/* Buttons: raised by default, inset ("pressed") on click */
+.stButton > button, button[kind="secondary"] {
+    background-color: var(--app-bg) !important;
+    color: var(--app-text) !important;
+    border: none !important;
+    border-radius: 12px !important;
+    box-shadow: 4px 4px 8px var(--shadow-dark), -4px -4px 8px var(--shadow-light);
+    transition: box-shadow 0.12s ease;
+}
+.stButton > button:active {
+    box-shadow: inset 3px 3px 6px var(--shadow-dark), inset -3px -3px 6px var(--shadow-light) !important;
+}
+button[kind="primary"]:not(:disabled), .stButton > button[kind="primary"]:not(:disabled) {
+    background-color: var(--app-accent) !important;
+    color: var(--app-accent-text) !important;
+    font-weight: 600 !important;
+}
+.stButton > button:disabled {
+    opacity: 0.45 !important;
+    box-shadow: none !important;
+    cursor: not-allowed !important;
+}
+
+/* Tabs */
+[data-testid="stTabs"] {
+    box-shadow: inset 3px 3px 6px var(--shadow-dark), inset -3px -3px 6px var(--shadow-light);
+    border-radius: 14px;
+    padding: 4px;
+}
+[data-testid="stTabs"] button[aria-selected="true"] {
+    background-color: var(--app-bg) !important;
+    box-shadow: 4px 4px 8px var(--shadow-dark), -4px -4px 8px var(--shadow-light) !important;
+    border-radius: 10px !important;
+    color: var(--app-accent) !important;
+}
+
+/* Text inputs: subtle inset */
+[data-testid="stTextInput"] > div {
+    box-shadow: inset 3px 3px 6px var(--shadow-dark), inset -3px -3px 6px var(--shadow-light) !important;
+    border-radius: 12px !important;
+}
+
+/* Pure CSS/HTML light/dark switch — no Streamlit widget involved */
+.theme-switch {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+    padding: 4px 0 12px 0;
+}
+.theme-switch input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.theme-switch-track {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    border-radius: 999px;
+    background: var(--app-bg);
+    box-shadow: inset 3px 3px 6px var(--shadow-dark), inset -3px -3px 6px var(--shadow-light);
+    flex-shrink: 0;
+}
+.theme-switch-track::before {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--app-accent);
+    transition: transform 0.2s ease;
+}
+.theme-switch input:checked ~ .theme-switch-track::before {
+    transform: translateX(20px);
+}
+.theme-switch-label {
+    color: var(--app-text);
+    font-size: 0.95rem;
+}
+.theme-switch-label-off { display: inline; }
+.theme-switch-label-on { display: none; }
+.theme-switch input:checked ~ .theme-switch-label .theme-switch-label-off { display: none; }
+.theme-switch input:checked ~ .theme-switch-label .theme-switch-label-on { display: inline; }
+</style>
+"""
+
+_THEME_TOGGLE_HTML = """
+<label class="theme-switch">
+    <input type="checkbox" id="theme-toggle-checkbox">
+    <span class="theme-switch-track"></span>
+    <span class="theme-switch-label">
+        <span class="theme-switch-label-off">☀️ Light mode</span>
+        <span class="theme-switch-label-on">🌙 Dark mode</span>
+    </span>
+</label>
+"""
+
+
+def inject_theme_css():
+    """Injected exactly once. Both palettes live in this single static
+    stylesheet — switching them is handled entirely by the browser via the
+    checkbox's :checked state, never by re-running Python or Streamlit.
     """
-    Extract text from PDF using PyMuPDF (fitz).
-    Returns list of Document objects with page numbers in metadata.
-    """
-    documents = []
-    doc = fitz.open(stream=file_bytes, filetype="pdf")
-    
-    for page_num, page in enumerate(doc, start=1):
-        text = page.get_text()
-        if text.strip():
-            documents.append(Document(
-                page_content=text,
-                metadata={
-                    "source": filename,
-                    "page": page_num,
-                    "total_pages": len(doc)
-                }
-            ))
-    
-    doc.close()
-    return documents
+    st.markdown(_THEME_CSS, unsafe_allow_html=True)
 
 
-def extract_text_from_pdf_pdfplumber(file_bytes: bytes, filename: str) -> List[Document]:
-    """
-    Extract text from PDF using pdfplumber.
-    Returns list of Document objects with page numbers in metadata.
-    """
-    documents = []
-    
-    import io
-    pdf_file = io.BytesIO(file_bytes)
-    
-    with pdfplumber.open(pdf_file) as pdf:
-        for page_num, page in enumerate(pdf.pages, start=1):
-            text = page.extract_text()
-            if text and text.strip():
-                documents.append(Document(
-                    page_content=text,
-                    metadata={
-                        "source": filename,
-                        "page": page_num,
-                        "total_pages": len(pdf.pages)
-                    }
-                ))
-    
-    return documents
+def render_theme_toggle():
+    st.markdown(_THEME_TOGGLE_HTML, unsafe_allow_html=True)
 
 
-def extract_text_from_pdf_pypdf2(file_bytes: bytes, filename: str) -> List[Document]:
+@st.cache_resource(show_spinner=False)
+def get_vector_store_manager(session_id: str) -> VectorStoreManager:
+    """One VectorStoreManager per browser session, kept alive across
+    reruns so the FAISS index isn't reloaded from disk on every interaction.
+    Cached by session_id, so different visitors never share documents.
     """
-    Extract text from PDF using PyPDF2 (fallback).
-    Returns list of Document objects with page numbers in metadata.
-    """
-    documents = []
-    
-    import io
-    pdf_file = io.BytesIO(file_bytes)
-    reader = PdfReader(pdf_file)
-    
-    for page_num, page in enumerate(reader.pages, start=1):
-        text = page.extract_text()
-        if text and text.strip():
-            documents.append(Document(
-                page_content=text,
-                metadata={
-                    "source": filename,
-                    "page": page_num,
-                    "total_pages": len(reader.pages)
-                }
-            ))
-    
-    return documents
+    manager = VectorStoreManager(session_id=session_id)
+    manager.initialize()
+    return manager
 
 
-def extract_text_from_pdf(file_bytes: bytes, filename: str) -> List[Document]:
-    """
-    Extract text from PDF file using available library (priority: PyMuPDF > pdfplumber > PyPDF2).
-    Returns list of Document objects with page numbers.
-    """
-    if PYMUPDF_AVAILABLE:
-        try:
-            return extract_text_from_pdf_pymupdf(file_bytes, filename)
-        except Exception as e:
-            st.warning(f"PyMuPDF extraction failed: {e}. Trying fallback...")
-    
-    if PDFPLUMBER_AVAILABLE:
-        try:
-            return extract_text_from_pdf_pdfplumber(file_bytes, filename)
-        except Exception as e:
-            st.warning(f"pdfplumber extraction failed: {e}. Trying fallback...")
-    
-    if PYPDF2_AVAILABLE:
-        try:
-            return extract_text_from_pdf_pypdf2(file_bytes, filename)
-        except Exception as e:
-            st.error(f"All PDF extraction methods failed: {e}")
-            return []
-    
-    st.error("No PDF extraction library available. Please install PyMuPDF, pdfplumber, or PyPDF2.")
-    return []
+def friendly_error_message(exc: Exception) -> str:
+    if isinstance(exc, NoAPIKeysError):
+        return "🔑 No API key configured. Set the provider's API key in the app's environment or secrets."
+    if isinstance(exc, AllAPIKeysExhaustedError):
+        return "🐢 All configured API keys are currently rate-limited. Please wait a minute and try again."
+    text = str(exc)
+    if "401" in text or "invalid_api_key" in text.lower() or "unauthorized" in text.lower():
+        return "❌ Invalid API key. Please check the configured key(s)."
+    if "429" in text or "rate" in text.lower():
+        return "❌ API rate limit hit. Try again shortly, or configure another key for automatic failover."
+    return f"❌ {text[:300]}"
 
 
-def get_embeddings():
-    """
-    Get embeddings model - uses SentenceTransformers (free, runs locally).
-    
-    Note: Proxy support (if needed) via environment variables:
-    - HTTP_PROXY=http://your.proxy:port
-    - HTTPS_PROXY=http://your.proxy:port
-    """
-    # Use SentenceTransformers for embeddings
-    if SENTENCE_TRANSFORMERS_AVAILABLE:
-        st.info("📦 Using SentenceTransformers embeddings (free, runs locally).")
-        return HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
-            model_kwargs={"device": "cpu"}
-        )
-    
-    st.error("❌ No embeddings model available. Please install sentence-transformers.")
-    return None
+# ---------------------------------------------------------------------------
+# Sidebar
+# ---------------------------------------------------------------------------
+
+def render_sidebar(manager: VectorStoreManager):
+    with st.sidebar:
+        st.markdown("### ⚙️ Configuration")
+        render_theme_toggle()
+
+        # API access is configured by the deployer (env vars / Streamlit
+        # secrets) — this is a status indicator only, not something a
+        # visitor needs to manage.
+        if st.session_state.api_keys:
+            st.caption(f"🟢 AI connected · {len(st.session_state.api_keys)} key(s)")
+        else:
+            prefix = _PROVIDER_ENV_PREFIX.get(LLM_PROVIDER, LLM_PROVIDER.upper())
+            st.caption(f"🔴 AI not configured — set {prefix}_API_KEY in secrets")
+
+        st.divider()
+        st.subheader("📄 Your Documents")
+        docs = manager.get_documents_metadata()
+        if not docs:
+            st.caption("No documents uploaded yet.")
+        else:
+            for doc_id, meta in docs.items():
+                with st.expander(f"📎 {meta.get('filename', 'unknown')}"):
+                    st.caption(
+                        f"{meta.get('file_type', '?').upper()} • "
+                        f"{meta.get('chunks', 0)} chunks • "
+                        f"{meta.get('text_length', 0):,} chars"
+                    )
+                    if meta.get("summary"):
+                        st.markdown("**Summary**")
+                        st.write(meta["summary"])
+                    if meta.get("key_points"):
+                        st.markdown("**Key points**")
+                        for point in meta["key_points"]:
+                            st.markdown(f"- {point}")
+                    if st.button("🗑️ Delete", key=f"del_{doc_id}", use_container_width=True):
+                        manager.remove_document(doc_id)
+                        st.rerun()
+
+        st.divider()
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🗑️ Clear chat", use_container_width=True):
+                st.session_state.chat_history = []
+                st.rerun()
+        with col2:
+            if st.button("🗑️ Clear docs", use_container_width=True):
+                manager.clear_all()
+                st.rerun()
 
 
-def split_documents(documents: List[Document]) -> List[Document]:
-    """
-    Split documents into manageable chunks using RecursiveCharacterTextSplitter.
-    Preserves metadata including page numbers.
-    """
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
-        length_function=len
+# ---------------------------------------------------------------------------
+# Document upload tab
+# ---------------------------------------------------------------------------
+
+def render_upload_tab(manager: VectorStoreManager):
+    st.subheader("Upload documents")
+    st.caption(
+        f"Supported formats: {', '.join(SUPPORTED_FILE_TYPES).upper()} • "
+        f"Max {MAX_FILE_SIZE_MB} MB per file"
     )
-    
-    split_docs = []
-    for doc in documents:
-        # Split the text
-        chunks = splitter.split_text(doc.page_content)
-        
-        # Create new Document objects with metadata
-        for chunk_text in chunks:
-            split_docs.append(Document(
-                page_content=chunk_text,
-                metadata=doc.metadata.copy()  # Preserve source, page, etc.
-            ))
-    
-    return split_docs
 
+    auto_summarize = st.checkbox("Auto-summarize on upload", value=AUTO_SUMMARIZE)
 
-def get_or_create_vectorstore(documents: List[Document], embeddings):
-    """
-    Create or load FAISS vector store.
-    Caches embeddings to avoid re-processing PDFs.
-    """
-    if not documents:
-        return None
-    
-    # Create a unique key from document contents
-    doc_key = hashlib.md5(
-        "".join([doc.page_content for doc in documents]).encode()
-    ).hexdigest()
-    
-    cache_file = CACHE_DIR / f"vectorstore_{doc_key}.faiss"
-    cache_pkl = CACHE_DIR / f"vectorstore_{doc_key}.pkl"
-    
-    # Try to load cached vector store
-    if cache_file.exists() and cache_pkl.exists():
-        try:
-            vectorstore = FAISS.load_local(
-                str(CACHE_DIR),
-                embeddings,
-                allow_dangerous_deserialization=True,
-                index_name=f"vectorstore_{doc_key}"
-            )
-            st.success("Loaded cached embeddings from disk.")
-            return vectorstore
-        except Exception as e:
-            st.warning(f"Could not load cached vectorstore: {e}. Creating new one...")
-    
-    # Create new vector store
-    vectorstore = FAISS.from_documents(documents, embeddings)
-    
-    # Save to cache
-    try:
-        vectorstore.save_local(
-            str(CACHE_DIR),
-            index_name=f"vectorstore_{doc_key}"
-        )
-        st.success("Saved embeddings to cache for future use.")
-    except Exception as e:
-        st.warning(f"Could not save vectorstore to cache: {e}")
-    
-    return vectorstore
-
-
-def get_answer(vectorstore, question: str, llm):
-    """
-    Retrieve relevant chunks and generate answer using RAG.
-    Uses LCEL (LangChain Expression Language) approach for LangChain 1.0+.
-    Returns answer and source documents.
-    """
-    from langchain_core.prompts import ChatPromptTemplate
-    from langchain_core.runnables import RunnablePassthrough
-    
-    # Create retriever
-    retriever = vectorstore.as_retriever(search_kwargs={"k": TOP_K})
-    
-    # Create prompt template
-    template = """Use the following pieces of context to answer the question at the end.
-If you don't know the answer, just say that you don't know, don't try to make up an answer.
-
-{context}
-
-Question: {question}
-
-Answer:"""
-    prompt = ChatPromptTemplate.from_template(template)
-    
-    # Create chain using LCEL
-    def format_docs(docs):
-        return "\n\n".join(doc.page_content for doc in docs)
-    
-    chain = (
-        {"context": retriever | format_docs, "question": RunnablePassthrough()}
-        | prompt
-        | llm
+    uploaded_files = st.file_uploader(
+        "Choose files",
+        type=SUPPORTED_FILE_TYPES,
+        accept_multiple_files=True,
+        key="doc_uploader",
     )
-    
-    # Get answer
-    response = chain.invoke(question)
-    answer = response.content if hasattr(response, 'content') else str(response)
-    
-    # Get source documents
-    source_docs = retriever.get_relevant_documents(question)
-    
-    return answer, source_docs
+
+    process_clicked = st.button(
+        "🔄 Process documents", type="primary", disabled=not uploaded_files
+    )
+
+    if uploaded_files and process_clicked:
+        if auto_summarize and st.session_state.api_keys:
+            LLMService.set_api_keys(LLM_PROVIDER, st.session_state.api_keys)
+        summarization_service = SummarizationService(manager)
+        progress = st.progress(0.0)
+
+        for idx, uploaded_file in enumerate(uploaded_files):
+            with st.status(f"Processing {uploaded_file.name}...", expanded=False) as status:
+                try:
+                    suffix = Path(uploaded_file.name).suffix
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                        tmp.write(uploaded_file.getbuffer())
+                        tmp_path = tmp.name
+
+                    try:
+                        text, file_type = DocumentProcessor.process_document(tmp_path, uploaded_file.name)
+                    finally:
+                        os.unlink(tmp_path)
+
+                    doc_id = str(uuid.uuid4())
+                    chunks_created = manager.add_document(
+                        doc_id=doc_id,
+                        text=text,
+                        filename=uploaded_file.name,
+                        file_type=file_type,
+                    )
+                    status.update(label=f"✅ {uploaded_file.name} — {chunks_created} chunks", state="complete")
+
+                    if auto_summarize:
+                        try:
+                            summary, key_points = summarization_service.summarize_document(doc_id)
+                            doc_meta = manager.get_document_metadata(doc_id)
+                            if doc_meta:
+                                doc_meta["summary"] = summary
+                                doc_meta["key_points"] = key_points
+                                manager._save_metadata()
+                        except Exception as exc:
+                            st.warning(f"Summarization skipped for {uploaded_file.name}: {friendly_error_message(exc)}")
+
+                except ValueError as exc:
+                    status.update(label=f"⚠️ {uploaded_file.name}: {exc}", state="error")
+                except Exception as exc:
+                    status.update(label=f"❌ {uploaded_file.name}: {friendly_error_message(exc)}", state="error")
+
+            progress.progress((idx + 1) / len(uploaded_files))
+
+        st.success("Done! Switch to the Chat tab to ask questions.")
+        st.rerun()
 
 
-def format_source_docs(source_docs: List[Document]) -> str:
-    """
-    Format source documents for display with filename and page numbers.
-    """
-    sources = []
-    seen = set()
-    
-    for doc in source_docs:
-        source = doc.metadata.get("source", "Unknown")
-        page = doc.metadata.get("page", "?")
-        key = f"{source}_page_{page}"
-        
-        if key not in seen:
-            seen.add(key)
-            preview = doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content
-            sources.append(f"**{source}** (Page {page})\n{preview}")
-    
-    return "\n\n---\n\n".join(sources)
+# ---------------------------------------------------------------------------
+# Chat tab
+# ---------------------------------------------------------------------------
 
+def render_chat_tab(manager: VectorStoreManager):
+    docs = manager.get_documents_metadata()
+    if not docs:
+        st.info("👆 Upload documents in the **Upload** tab first.")
+        return
+
+    for turn in st.session_state.chat_history:
+        with st.chat_message("user"):
+            st.write(turn["question"])
+        with st.chat_message("assistant"):
+            st.write(turn["answer"])
+            if turn.get("sources"):
+                with st.expander("📑 Sources"):
+                    for source in turn["sources"]:
+                        st.markdown(f"**{source['filename']}** (chunk {source['chunk_index']})")
+                        st.caption(source["content"])
+
+    question = st.chat_input("Ask a question about your documents...")
+    if not question:
+        return
+
+    if not st.session_state.api_keys:
+        st.error("🔑 AI isn't configured yet. Set the provider's API key in the app's environment or secrets.")
+        return
+
+    with st.chat_message("user"):
+        st.write(question)
+
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            try:
+                LLMService.set_api_keys(LLM_PROVIDER, st.session_state.api_keys)
+                rag_chain = RAGChain(manager)
+                result = rag_chain.answer_question(question)
+                answer = result["answer"]
+                sources = result["sources"]
+                st.write(answer)
+                if sources:
+                    with st.expander("📑 Sources"):
+                        for source in sources:
+                            st.markdown(f"**{source['filename']}** (chunk {source['chunk_index']})")
+                            st.caption(source["content"])
+                st.session_state.chat_history.append({
+                    "question": question,
+                    "answer": answer,
+                    "sources": sources,
+                })
+            except Exception as exc:
+                message = friendly_error_message(exc)
+                st.error(message)
+                st.session_state.chat_history.append({
+                    "question": question,
+                    "answer": message,
+                    "sources": [],
+                })
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main():
-    """Main Streamlit application."""
-    # Check for required imports at runtime (after page config is set)
-    if RecursiveCharacterTextSplitter is None:
-        st.error("❌ Could not import RecursiveCharacterTextSplitter. Please install langchain-text-splitters.")
-        st.info("💡 Run: pip install langchain-text-splitters")
+    if not OPENAI_COMPATIBLE_AVAILABLE:
+        st.error("❌ langchain-openai is not installed. Run: pip install langchain-openai")
         return
-    
-    if FAISS is None:
-        st.error("❌ Could not import FAISS. Please install langchain-community and faiss-cpu.")
-        st.info("💡 Run: pip install langchain-community faiss-cpu")
-        return
-    
-    if Document is None:
-        st.error("❌ Could not import Document. Please install langchain-core or langchain.")
-        st.info("💡 Run: pip install langchain-core")
-        return
-    
-    st.title("📚 Retrieval-Augmented Generation (RAG) PDF Q&A System")
-    st.markdown("Upload PDF files and ask questions based on their contents.")
-    
-    # Sidebar for configuration
-    with st.sidebar:
-        st.header("⚙️ Configuration")
-        
-        # Gemini API Key
-        st.subheader("Google Gemini API")
-        gemini_key = st.text_input(
-            "Google Gemini API Key",
-            type="password",
-            help="Get your API key from: https://aistudio.google.com/apikey",
-            value=st.session_state.get("gemini_api_key", st.secrets.get("GOOGLE_API_KEY", os.getenv("GOOGLE_API_KEY", "")))
-        )
-        if gemini_key:
-            st.session_state["gemini_api_key"] = gemini_key
-            os.environ["GOOGLE_API_KEY"] = gemini_key
-        
-        # LLM Model selection for Gemini
-        # Using current available model names (as of 2024/2025)
-        gemini_model = st.selectbox(
-            "Gemini Model",
-            ["gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"],
-            index=0,
-            help="Gemini model - gemini-2.5-flash-lite is recommended (latest, fast). If models fail, try different ones."
-        )
-        st.session_state["llm_model"] = gemini_model
-        st.session_state["llm_provider"] = "gemini"
-        
-        if not gemini_key:
-            st.info("💡 **Free Gemini API**: Get your free API key from [Google AI Studio](https://aistudio.google.com/apikey)")
-        else:
-            # Add button to list available models
-            if GENAI_AVAILABLE and st.button("🔍 List Available Models", help="Click to see which Gemini models are available with your API key"):
-                try:
-                    genai.configure(api_key=gemini_key)
-                    models = genai.list_models()
-                    available_models = [m.name.replace("models/", "") for m in models if "gemini" in m.name.lower() and "generateContent" in m.supported_generation_methods]
-                    if available_models:
-                        st.success("✅ Available Gemini models:")
-                        for model in available_models:
-                            st.write(f"  - `{model}`")
-                        st.info("💡 Use one of these model names if the dropdown models don't work.")
-                    else:
-                        st.warning("⚠️ No Gemini models found. Please check your API key.")
-                except Exception as e:
-                    st.error(f"❌ Error listing models: {str(e)[:200]}")
-        
-        st.divider()
-        st.subheader("Embeddings")
-        st.info("📦 Using SentenceTransformers (free, runs locally) for document embeddings.")
-        
-        st.divider()
-        
-        # Clear cache button
-        if st.button("🗑️ Clear Cache", help="Clear cached embeddings"):
-            import shutil
-            if CACHE_DIR.exists():
-                shutil.rmtree(CACHE_DIR)
-                CACHE_DIR.mkdir(exist_ok=True)
-            st.success("Cache cleared!")
-    
-    # Initialize session state
-    if "vectorstore" not in st.session_state:
-        st.session_state.vectorstore = None
-    if "uploaded_files" not in st.session_state:
-        st.session_state.uploaded_files = []
-    
-    # File upload section
-    st.header("📄 Upload PDF Files")
-    uploaded_files = st.file_uploader(
-        "Choose PDF files",
-        type=["pdf"],
-        accept_multiple_files=True,
-        help="Upload one or more PDF files to analyze"
+
+    init_session_state()
+    inject_theme_css()
+    manager = get_vector_store_manager(st.session_state.session_id)
+
+    st.markdown(
+        """
+        <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.1rem;">
+            <span style="font-size:2.2rem; line-height:1;">📚</span>
+            <span style="font-size:2rem; font-weight:700; letter-spacing:-0.02em;">RAG Document Q&amp;A</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    
-    # Process uploaded files
-    if uploaded_files:
-        if st.button("🔄 Process Documents", type="primary"):
-            with st.spinner("Processing PDFs and creating embeddings..."):
-                all_documents = []
-                
-                # Process each file
-                progress_bar = st.progress(0)
-                for idx, uploaded_file in enumerate(uploaded_files):
-                    # Check if file was already processed
-                    file_hash = get_file_hash(uploaded_file.read())
-                    uploaded_file.seek(0)  # Reset file pointer
-                    
-                    # Extract text from PDF
-                    documents = extract_text_from_pdf(uploaded_file.read(), uploaded_file.name)
-                    
-                    if documents:
-                        all_documents.extend(documents)
-                        st.success(f"✓ Processed {uploaded_file.name} ({len(documents)} pages)")
-                    else:
-                        st.warning(f"⚠ Could not extract text from {uploaded_file.name}")
-                    
-                    progress_bar.progress((idx + 1) / len(uploaded_files))
-                
-                if all_documents:
-                    # Split into chunks
-                    with st.spinner("Splitting documents into chunks..."):
-                        split_docs = split_documents(all_documents)
-                        st.info(f"Created {len(split_docs)} chunks from {len(all_documents)} pages")
-                    
-                    # Get embeddings
-                    with st.spinner("Creating embeddings..."):
-                        embeddings = get_embeddings()
-                        if embeddings:
-                            try:
-                                # Create or load vector store
-                                vectorstore = get_or_create_vectorstore(split_docs, embeddings)
-                                st.session_state.vectorstore = vectorstore
-                                st.session_state.uploaded_files = [f.name for f in uploaded_files]
-                                st.success("✅ Documents processed and ready for Q&A!")
-                            except Exception as e:
-                                error_msg = str(e)
-                                st.error(f"❌ Error creating embeddings: {error_msg[:200]}")
-                                st.info("💡 Make sure sentence-transformers is installed: pip install sentence-transformers")
-                        else:
-                            st.error("❌ Failed to create embeddings. Please check your configuration.")
-                else:
-                    st.error("No text could be extracted from the uploaded files.")
-        
-        # Display uploaded files
-        if st.session_state.uploaded_files:
-            st.subheader("📋 Uploaded Files")
-            for filename in st.session_state.uploaded_files:
-                st.write(f"- {filename}")
-            
-            if st.button("🗑️ Clear Documents"):
-                st.session_state.vectorstore = None
-                st.session_state.uploaded_files = []
-                st.success("Documents cleared!")
-                st.rerun()
-    
+    st.caption("Upload documents and chat with them, grounded in your own files.")
+
+    render_sidebar(manager)
+
+    tab_upload, tab_chat = st.tabs(["📁 Upload & Manage", "💬 Chat"])
+    with tab_upload:
+        render_upload_tab(manager)
+    with tab_chat:
+        render_chat_tab(manager)
+
     st.divider()
-    
-    # Q&A Section
-    st.header("❓ Ask Questions")
-    
-    if st.session_state.vectorstore is None:
-        st.info("👆 Please upload and process PDF files first.")
-    else:
-        # Question input
-        question = st.text_area(
-            "Enter your question:",
-            height=100,
-            placeholder="e.g., What is the main topic of the document? What are the key findings?",
-            help="Ask any question about the uploaded PDF documents"
-        )
-        
-        if st.button("🔍 Get Answer", type="primary", disabled=not question.strip()):
-            if not question.strip():
-                st.warning("Please enter a question.")
-            else:
-                with st.spinner("🔍 Searching documents and generating answer..."):
-                    # Get LLM based on provider (only Gemini)
-                    llm_provider = st.session_state.get("llm_provider", "gemini")
-                    llm_model = st.session_state.get("llm_model", "gemini-1.5-flash")
-                    
-                    # Try to use the model name as-is first
-                    # If it fails, we'll handle it in the exception
-                    
-                    # Initialize LLM variable
-                    llm = None
-                    llm_created = False
-                    
-                    # Use Gemini
-                    if not GEMINI_AVAILABLE:
-                        st.error("❌ Gemini LLM not available. Please install langchain-google-genai.")
-                    else:
-                        # Try to get API key from Streamlit secrets first (for Streamlit Cloud), then env var, then session state
-                        api_key = st.secrets.get("GOOGLE_API_KEY", None) or os.getenv("GOOGLE_API_KEY") or st.session_state.get("gemini_api_key")
-                        if not api_key:
-                            st.error("❌ Gemini API key required. Please set it in the sidebar.")
-                            st.info("💡 Get your free API key from: https://aistudio.google.com/apikey")
-                        else:
-                            try:
-                                # Try creating LLM with the selected model
-                                # First, try the model name as-is
-                                clean_model = llm_model.replace("models/", "").strip()
-                                
-                                # List of models to try in order (current available models as of 2024/2025)
-                                models_to_try = [
-                                    clean_model,  # Try selected model first
-                                    "gemini-2.5-flash-lite",  # Latest recommended
-                                    "gemini-2.5-pro",  # Latest pro model
-                                    "gemini-1.5-flash",  # Fallback
-                                    "gemini-1.5-pro",  # Fallback
-                                    "gemini-pro",  # Legacy fallback
-                                    "models/gemini-2.5-flash-lite",  # With prefix
-                                    "models/gemini-2.5-pro",
-                                    "models/gemini-1.5-flash",
-                                    "models/gemini-1.5-pro"
-                                ]
-                                
-                                # Remove duplicates while preserving order
-                                seen = set()
-                                models_to_try = [m for m in models_to_try if not (m in seen or seen.add(m))]
-                                
-                                llm_created = False
-                                last_error = None
-                                
-                                for model_name in models_to_try:
-                                    try:
-                                        if model_name != clean_model:
-                                            st.info(f"🔄 Trying model: {model_name}...")
-                                        
-                                        # Try creating LLM with model name
-                                        # Note: LangChain handles the API version internally
-                                        llm = CHAT_GOOGLE_GENERATIVE_AI(
-                                            model=model_name,
-                                            temperature=0.0,
-                                            google_api_key=api_key,
-                                            convert_system_message_to_human=True
-                                        )
-                                        
-                                        # If we get here, model was created successfully
-                                        llm_created = True
-                                        st.session_state["llm_model"] = model_name
-                                        if model_name != clean_model:
-                                            st.success(f"✅ Using '{model_name}' model successfully!")
-                                        break
-                                            
-                                    except Exception as e_model:
-                                        last_error = str(e_model)
-                                        # Continue to next model
-                                        continue
-                                
-                                if not llm_created:
-                                    st.error(f"❌ All Gemini models failed. Error: {str(last_error)[:300]}")
-                                    st.info("💡 **Possible solutions:**")
-                                    st.info("1. Verify your API key at: https://aistudio.google.com/apikey")
-                                    st.info("2. Check if your API key has access to Gemini models")
-                                    st.info("3. Try creating a new API key")
-                                    st.info("4. Check the model availability in your region")
-                            except Exception as e:
-                                st.error(f"❌ Error creating Gemini LLM: {str(e)[:300]}")
-                                st.info("💡 Check your API key and try selecting a different model from the dropdown.")
-                    
-                    # If LLM is created, proceed with answer generation
-                    if llm_created and llm:
-                        try:
-                            answer, source_docs = get_answer(
-                                st.session_state.vectorstore,
-                                question,
-                                llm
-                            )
-                            
-                            # Display answer
-                            st.subheader("💡 Answer")
-                            st.write(answer)
-                            
-                            # Display sources
-                            if source_docs:
-                                st.subheader("📑 Source Documents")
-                                st.markdown(format_source_docs(source_docs))
-                                
-                                # Show source details in expander
-                                with st.expander("View detailed source information"):
-                                    for i, doc in enumerate(source_docs, 1):
-                                        st.markdown(f"**Source {i}:**")
-                                        st.markdown(f"- **File:** {doc.metadata.get('source', 'Unknown')}")
-                                        st.markdown(f"- **Page:** {doc.metadata.get('page', '?')}")
-                                        st.markdown(f"- **Content Preview:**")
-                                        st.text(doc.page_content[:500] + "..." if len(doc.page_content) > 500 else doc.page_content)
-                                        st.divider()
-                        except Exception as e:
-                            error_msg = str(e)
-                            # Gemini error handling
-                            if "401" in error_msg or "invalid_api_key" in error_msg or "API_KEY_INVALID" in error_msg:
-                                st.error("❌ Invalid Gemini API key. Please check your API key in the sidebar.")
-                                st.info("💡 Get your free API key from: https://aistudio.google.com/apikey")
-                            elif "429" in error_msg or "quota" in error_msg.lower() or "RATE_LIMIT" in error_msg:
-                                st.error("❌ **Gemini API Rate Limit Exceeded**")
-                                st.warning("You've hit the Gemini API rate limit.")
-                                st.info("""
-                                **To fix this:**
-                                1. **Wait a few minutes** and try again
-                                2. **Check your usage**: https://aistudio.google.com/app/apikey
-                                """)
-                            else:
-                                st.error(f"❌ Error generating answer: {error_msg[:300]}")
-    
-    # Footer
-    st.divider()
-    st.markdown("""
-    <div style='text-align: center; color: gray;'>
-        Built with LangChain, FAISS, and Streamlit
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        "<div style='text-align: center; color: var(--app-muted);'>"
+        "Built with Streamlit, LangChain, and FAISS"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 if __name__ == "__main__":
@@ -721,13 +586,10 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         import traceback
-        # Ensure page config is set before showing errors
         try:
-            st.set_page_config(page_title="RAG PDF Q&A System", page_icon="📚", layout="wide")
-        except:
+            st.set_page_config(page_title="RAG Document Q&A", page_icon="📚", layout="wide")
+        except Exception:
             pass
         st.error("❌ Application Error")
         st.code(str(e))
         st.code(traceback.format_exc())
-        st.info("💡 Check the Streamlit Cloud logs for more details.")
-

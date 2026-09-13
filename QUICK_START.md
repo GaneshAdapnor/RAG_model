@@ -1,34 +1,31 @@
-# Quick Start Guide - RAG PDF Q&A System
+# Quick Start Guide - RAG Document Q&A System
 
 ## Step 1: Install Dependencies
 
 ```bash
-pip install -r requirements_rag.txt
+pip install -r requirements.txt
 ```
 
-**Important**: Install at least one PDF processing library:
+## Step 2: Set your OpenRouter API Key
+
+Get a free key from [OpenRouter Console](https://openrouter.ai/settings/keys).
+
+**Option A**: Create a `.env` file (copy `.env.example`)
 ```bash
-pip install PyMuPDF  # Recommended
-# OR
-pip install pdfplumber
-# OR
-pip install PyPDF2
+cp .env.example .env
+# then edit .env and set OPENROUTER_API_KEY=your-key-here
 ```
 
-## Step 2: Set OpenAI API Key (Optional)
-
-**Option A**: Set environment variable
+**Option B**: Set an environment variable
 ```bash
 # Windows
-set OPENAI_API_KEY=your_key_here
+set OPENROUTER_API_KEY=your_key_here
 
 # Linux/Mac
-export OPENAI_API_KEY=your_key_here
+export OPENROUTER_API_KEY=your_key_here
 ```
 
-**Option B**: Enter in Streamlit sidebar (when app runs)
-
-**Note**: If no API key, the system will use SentenceTransformers (free, but slower)
+The key is read once at startup from your environment/secrets — there's no in-app field for it, since it's a deployer-configured setting, not something each visitor manages.
 
 ## Step 3: Run the Application
 
@@ -40,34 +37,34 @@ The app will open automatically in your browser at `http://localhost:8501`
 
 ## Step 4: Use the Application
 
-1. **Upload PDFs**: Click "Browse files" and select your PDF files
-2. **Process**: Click "🔄 Process Documents"
-   - Wait for processing to complete
-   - You'll see progress bars and success messages
-3. **Ask Questions**: Enter a question and click "🔍 Get Answer"
-   - Get instant answers with source citations
-   - View page numbers and file sources
+1. **Upload documents**: PDF, Word (.docx), text, Markdown, HTML, or CSV
+2. **Process**: Click "🔄 Process documents" in the Upload tab
+   - Each file gets chunked, embedded, and (optionally) auto-summarized
+3. **Chat**: Switch to the Chat tab and ask questions
+   - Answers include source chunks so you can verify them
+   - Chat history is kept for the session
 
 ## Features Overview
 
-✅ **Multiple PDF Support**: Upload several PDFs at once
-✅ **Smart Caching**: First processing creates cache, next time is instant
-✅ **Source Attribution**: See exactly which file and page the answer came from
-✅ **Processing Indicators**: Visual feedback during all operations
-✅ **Clear Options**: Clear documents or cache anytime
+✅ **Multi-format documents**: PDF, Word, TXT, Markdown, HTML, CSV, RTF
+✅ **Chat-style Q&A** with persistent history and source citations
+✅ **Automatic key failover**: add multiple OpenRouter keys and the app rotates past rate limits
+✅ **Per-session isolation**: your documents are private to your browser session
+✅ **Auto-summarization** with key points on upload
 
 ## Troubleshooting
 
-**"No PDF extraction library available"**
-→ Install: `pip install PyMuPDF`
+**"No OpenRouter API key configured"**
+→ Add one via `.env`, an environment variable, or the sidebar
 
-**"No embeddings model available"**
-→ Install: `pip install sentence-transformers`
-→ OR set OPENAI_API_KEY
+**"All configured OpenRouter API keys are currently rate-limited"**
+→ Wait a minute, or add another free key from the OpenRouter Console
 
-**Slow processing first time**
-→ Normal! First run downloads models and creates cache
-→ Subsequent runs are much faster
+**"File exceeds the X MB limit"**
+→ Split the document or raise `MAX_FILE_SIZE_MB` in `.env`
+
+**Slow first run**
+→ Normal — the embeddings model downloads once and is cached afterward
 
 ## Example Questions
 
@@ -78,4 +75,3 @@ The app will open automatically in your browser at `http://localhost:8501`
 - "What are the conclusions?"
 
 Enjoy using the RAG system! 🚀
-

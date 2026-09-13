@@ -1,5 +1,5 @@
-# Streamlit RAG System - Optimized for Streamlit Cloud
-# Using Google Gemini API for document answering
+# RAG Document Q&A System - Streamlit UI over the backend/ core
+# LLM answering via Groq (Llama models); embeddings are local SentenceTransformers
 
 # Core dependencies
 streamlit>=1.28.0
@@ -9,18 +9,27 @@ python-dotenv>=1.0.0
 langchain>=0.3.0
 langchain-community>=0.3.0
 langchain-core>=0.3.0
-langchain-google-genai>=2.0.0
 langchain-text-splitters>=0.3.0
 
-# Google Gemini API
-google-generativeai>=0.3.0
+# Groq API
+langchain-groq>=0.2.0
+groq>=0.11.0
 
 # Vector store (compatible with Streamlit Cloud)
 faiss-cpu>=1.7.4
 
-# PDF processing
-PyMuPDF>=1.23.0
+# Document processing
+PyPDF2>=3.0.0
+pdfplumber>=0.10.0
+python-docx>=1.1.0
+html2text>=2020.1.16
+markdown>=3.5.0
 
 # Embeddings - SentenceTransformers
 # Note: This is large but required. Using compatible version.
 sentence-transformers>=2.2.0,<3.0.0
+
+# FastAPI backend (optional standalone API — not required for the Streamlit app)
+fastapi>=0.110.0
+uvicorn>=0.29.0
+pydantic>=2.0.0
