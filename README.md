@@ -4,14 +4,14 @@ Upload a document, get grounded answers with citations — no hallucinated facts
 
 A Retrieval-Augmented Generation system built end-to-end: multi-format document ingestion, local embeddings, FAISS vector search, and LLM answering via OpenRouter — wrapped in a polished, chat-style Streamlit UI with a real dark/light mode.
 
-**🔗 Live demo:** _add your deployed Streamlit Cloud URL here_
+**🔗 Live demo:** [rag-document-model.streamlit.app](https://rag-document-model.streamlit.app/)
 
-![Python](https://img.shields.io/badge/Python-3.9+-blue?logo=python&logoColor=white)
-![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?logo=streamlit&logoColor=white)
-![LangChain](https://img.shields.io/badge/LangChain-1C3C3C?logo=langchain&logoColor=white)
-![FAISS](https://img.shields.io/badge/FAISS-vector%20search-informational)
-![OpenRouter](https://img.shields.io/badge/OpenRouter-multi--model%20LLM-8b5cf6)
-![License](https://img.shields.io/badge/license-MIT-green)
+[![Python](https://img.shields.io/badge/Python-3.9+-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![LangChain](https://img.shields.io/badge/LangChain-1C3C3C?logo=langchain&logoColor=white)](https://www.langchain.com/)
+[![FAISS](https://img.shields.io/badge/FAISS-vector%20search-informational)](https://github.com/facebookresearch/faiss)
+[![OpenRouter](https://img.shields.io/badge/OpenRouter-multi--model%20LLM-8b5cf6)](https://openrouter.ai/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 ---
 
