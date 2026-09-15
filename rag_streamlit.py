@@ -254,6 +254,12 @@ button[kind="primary"]:not(:disabled), .stButton > button[kind="primary"]:not(:d
     border-radius: 12px !important;
 }
 
+/* Hide the chat form's submit button — pressing Enter in the text input
+   still submits the form even though the button itself is invisible. */
+[data-testid="stForm"] [data-testid="stFormSubmitButton"] {
+    display: none !important;
+}
+
 /* Pure CSS/HTML light/dark switch — no Streamlit widget involved */
 .theme-switch {
     display: flex;
